@@ -1,28 +1,33 @@
-// Package redditmessenger sends and reads Reddit direct messages —
-// both legacy private messages (via oauth.reddit.com) and real-time
-// chat (via Reddit's Matrix-based chat at matrix.redditspace.com).
+// Package reddit is a full-surface Reddit API client — messaging,
+// posting, commenting, voting, search, subscriptions, and chat.
 //
 // No API keys, no OAuth app registration, zero dependencies.
 // Authenticate with a token_v2 cookie from your logged-in browser session.
 //
 // # Quick start
 //
-//	m := redditmessenger.New(&redditmessenger.Options{
+//	c := reddit.New(&reddit.Options{
 //		Token: "your_token_v2_value",
 //	})
 //
-//	// Read inbox
-//	msgs, err := m.Inbox(10)
+//	// Identity
+//	me, _ := c.Me()
 //
-//	// Send a PM
-//	err = m.Compose("username", "subject", "message body")
+//	// Read inbox & send PMs
+//	inbox, _ := c.Inbox(10)
+//	_ = c.Compose("username", "subject", "message body")
 //
-//	// List chat rooms
-//	rooms, err := m.ChatRooms()
+//	// Posts & comments
+//	posts, _ := c.MyPosts(10)
+//	_ = c.Submit("subreddit", "title", "body")
+//	_ = c.Reply("t3_postid", "comment text")
 //
-//	// Read chat messages
-//	msgs, err := m.ChatMessages(roomID, 20)
+//	// Chat (Matrix)
+//	rooms, _ := c.ChatRooms()
+//	_ = c.ChatSend(roomID, "hello!")
 //
-//	// Send a chat message
-//	err = m.ChatSend(roomID, "hello!")
-package redditmessenger
+//	// Search, vote, subscribe
+//	results, _ := c.Search("query", 10)
+//	_ = c.Upvote("t3_postid")
+//	_ = c.Subscribe("golang")
+package reddit

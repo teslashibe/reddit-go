@@ -1,3 +1,3 @@
-module github.com/teslashibe/reddit-messenger-go
+module github.com/teslashibe/reddit-go
 
 go 1.25.5
