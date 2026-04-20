@@ -21,8 +21,8 @@ func (m *Client) fetchMessages(endpoint string, limit int, after string) (*Messa
 		return nil, err
 	}
 
-	var listing redditListing
-	if err := json.Unmarshal(body, &listing); err != nil {
+	listing, children, err := parseListing(body)
+	if err != nil {
 		return nil, fmt.Errorf("decoding message listing: %w", err)
 	}
 
@@ -30,19 +30,22 @@ func (m *Client) fetchMessages(endpoint string, limit int, after string) (*Messa
 		After:  listing.Data.After,
 		Before: listing.Data.Before,
 	}
-	for _, child := range listing.Data.Children {
-		result.Messages = append(result.Messages, child.Data.toMessage())
+	for _, child := range children {
+		var raw rawMessage
+		if err := json.Unmarshal(child.Data, &raw); err != nil {
+			continue
+		}
+		result.Messages = append(result.Messages, raw.toMessage())
 	}
 	return result, nil
 }
 
 // Inbox returns the user's inbox (PMs + comment replies).
-// Limit of 0 returns Reddit's default (25). Max is 100.
 func (m *Client) Inbox(limit int) (*MessageListing, error) {
 	return m.fetchMessages("/message/inbox.json", limit, "")
 }
 
-// InboxAfter returns the next page of inbox messages after the given cursor.
+// InboxAfter returns the next page of inbox messages.
 func (m *Client) InboxAfter(limit int, after string) (*MessageListing, error) {
 	return m.fetchMessages("/message/inbox.json", limit, after)
 }
@@ -52,7 +55,7 @@ func (m *Client) Messages(limit int) (*MessageListing, error) {
 	return m.fetchMessages("/message/messages.json", limit, "")
 }
 
-// MessagesAfter returns the next page of PMs after the given cursor.
+// MessagesAfter returns the next page of PMs.
 func (m *Client) MessagesAfter(limit int, after string) (*MessageListing, error) {
 	return m.fetchMessages("/message/messages.json", limit, after)
 }
@@ -62,7 +65,7 @@ func (m *Client) Sent(limit int) (*MessageListing, error) {
 	return m.fetchMessages("/message/sent.json", limit, "")
 }
 
-// SentAfter returns the next page of sent messages after the given cursor.
+// SentAfter returns the next page of sent messages.
 func (m *Client) SentAfter(limit int, after string) (*MessageListing, error) {
 	return m.fetchMessages("/message/sent.json", limit, after)
 }
@@ -70,6 +73,16 @@ func (m *Client) SentAfter(limit int, after string) (*MessageListing, error) {
 // Unread returns unread inbox items.
 func (m *Client) Unread(limit int) (*MessageListing, error) {
 	return m.fetchMessages("/message/unread.json", limit, "")
+}
+
+// CommentReplies returns replies to the user's comments.
+func (m *Client) CommentReplies(limit int) (*MessageListing, error) {
+	return m.fetchMessages("/message/comments.json", limit, "")
+}
+
+// PostReplies returns replies to the user's posts.
+func (m *Client) PostReplies(limit int) (*MessageListing, error) {
+	return m.fetchMessages("/message/selfreply.json", limit, "")
 }
 
 // Compose sends a private message to a Reddit user.
@@ -99,14 +112,11 @@ func (m *Client) Compose(to, subject, body string) error {
 }
 
 // MarkRead marks one or more messages as read.
-// Pass fullnames like "t1_abc123" or "t4_abc123".
 func (m *Client) MarkRead(fullnames ...string) error {
 	if len(fullnames) == 0 {
 		return nil
 	}
-	form := url.Values{
-		"id": {joinComma(fullnames)},
-	}
+	form := url.Values{"id": {joinComma(fullnames)}}
 	_, err := m.oauthPost("/api/read_message", form)
 	return err
 }
@@ -116,9 +126,7 @@ func (m *Client) MarkUnread(fullnames ...string) error {
 	if len(fullnames) == 0 {
 		return nil
 	}
-	form := url.Values{
-		"id": {joinComma(fullnames)},
-	}
+	form := url.Values{"id": {joinComma(fullnames)}}
 	_, err := m.oauthPost("/api/unread_message", form)
 	return err
 }

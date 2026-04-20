@@ -1,6 +1,9 @@
 package reddit
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Message represents a Reddit private message or inbox item.
 type Message struct {
@@ -18,31 +21,156 @@ type Message struct {
 	Subreddit string    `json:"subreddit,omitempty"`
 	ParentID  string    `json:"parent_id,omitempty"`
 
-	// WasComment is true when this inbox item is a comment reply,
-	// not a private message.
 	WasComment bool `json:"was_comment"`
 }
 
-// MessageListing is a paginated list of messages from the Reddit API.
+// MessageListing is a paginated list of messages.
 type MessageListing struct {
 	Messages []Message
 	After    string
 	Before   string
 }
 
-// redditListing is the raw Reddit API listing wrapper.
+// Post represents a Reddit submission.
+type Post struct {
+	ID            string    `json:"id"`
+	Fullname      string    `json:"name"`
+	Subreddit     string    `json:"subreddit"`
+	Title         string    `json:"title"`
+	Author        string    `json:"author"`
+	SelfText      string    `json:"selftext"`
+	URL           string    `json:"url"`
+	Permalink     string    `json:"permalink"`
+	Domain        string    `json:"domain"`
+	Score         int       `json:"score"`
+	UpvoteRatio   float64   `json:"upvote_ratio"`
+	NumComments   int       `json:"num_comments"`
+	Created       time.Time `json:"created_utc"`
+	IsSelf        bool      `json:"is_self"`
+	Over18        bool      `json:"over_18"`
+	Stickied      bool      `json:"stickied"`
+	Locked        bool      `json:"locked"`
+	Archived      bool      `json:"archived"`
+	Saved         bool      `json:"saved"`
+	Hidden        bool      `json:"hidden"`
+	IsVideo       bool      `json:"is_video"`
+	Distinguished string    `json:"distinguished,omitempty"`
+	LinkFlairText string    `json:"link_flair_text,omitempty"`
+}
+
+// PostListing is a paginated list of posts.
+type PostListing struct {
+	Posts  []Post
+	After  string
+	Before string
+}
+
+// Comment represents a Reddit comment.
+type Comment struct {
+	ID            string    `json:"id"`
+	Fullname      string    `json:"name"`
+	Author        string    `json:"author"`
+	Body          string    `json:"body"`
+	BodyHTML      string    `json:"body_html"`
+	Subreddit     string    `json:"subreddit"`
+	Score         int       `json:"score"`
+	Created       time.Time `json:"created_utc"`
+	ParentID      string    `json:"parent_id"`
+	LinkID        string    `json:"link_id"`
+	LinkTitle     string    `json:"link_title"`
+	Permalink     string    `json:"permalink"`
+	Depth         int       `json:"depth"`
+	IsSubmitter   bool      `json:"is_submitter"`
+	Stickied      bool      `json:"stickied"`
+	Edited        bool      `json:"edited"`
+	Distinguished string    `json:"distinguished,omitempty"`
+}
+
+// CommentListing is a paginated list of comments.
+type CommentListing struct {
+	Comments []Comment
+	After    string
+	Before   string
+}
+
+// OverviewItem is either a Post or Comment from the overview feed.
+type OverviewItem struct {
+	Kind    string   // "t3" for post, "t1" for comment
+	Post    *Post    // set when Kind == "t3"
+	Comment *Comment // set when Kind == "t1"
+}
+
+// OverviewListing is a paginated list of overview items.
+type OverviewListing struct {
+	Items  []OverviewItem
+	After  string
+	Before string
+}
+
+// User holds public info about a Reddit user.
+type User struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Created      time.Time `json:"created_utc"`
+	LinkKarma    int       `json:"link_karma"`
+	CommentKarma int       `json:"comment_karma"`
+	TotalKarma   int       `json:"total_karma"`
+	IsGold       bool      `json:"is_gold"`
+	IsMod        bool      `json:"is_mod"`
+	Verified     bool      `json:"verified"`
+	HasVerifiedEmail bool  `json:"has_verified_email"`
+	IconImg      string    `json:"icon_img"`
+}
+
+// SubredditInfo holds metadata about a subreddit.
+type SubredditInfo struct {
+	ID                string    `json:"id"`
+	Name              string    `json:"display_name"`
+	Title             string    `json:"title"`
+	Description       string    `json:"public_description"`
+	Subscribers       int       `json:"subscribers"`
+	ActiveUsers       int       `json:"accounts_active"`
+	Created           time.Time `json:"created_utc"`
+	Over18            bool      `json:"over_18"`
+	SubredditType     string    `json:"subreddit_type"`
+}
+
+// SubredditListing is a paginated list of subreddits.
+type SubredditListing struct {
+	Subreddits []SubredditInfo
+	After      string
+	Before     string
+}
+
+// Trophy represents a Reddit trophy/award.
+type Trophy struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	AwardID     string `json:"award_id"`
+	IconURL     string `json:"icon_70"`
+}
+
+// Friend represents a Reddit friend.
+type Friend struct {
+	Name string    `json:"name"`
+	ID   string    `json:"id"`
+	Date time.Time `json:"date"`
+}
+
+// --- internal raw types for JSON decoding ---
+
 type redditListing struct {
 	Kind string `json:"kind"`
 	Data struct {
-		After    string        `json:"after"`
-		Before   string        `json:"before"`
-		Children []redditChild `json:"children"`
+		After    string          `json:"after"`
+		Before   string          `json:"before"`
+		Children json.RawMessage `json:"children"`
 	} `json:"data"`
 }
 
 type redditChild struct {
-	Kind string      `json:"kind"`
-	Data rawMessage  `json:"data"`
+	Kind string          `json:"kind"`
+	Data json.RawMessage `json:"data"`
 }
 
 type rawMessage struct {
@@ -70,7 +198,7 @@ func (r *rawMessage) toMessage() Message {
 		Dest:       r.Dest,
 		Subject:    r.Subject,
 		Body:       r.Body,
-		BodyHTML:    r.BodyHTML,
+		BodyHTML:   r.BodyHTML,
 		Created:    time.Unix(int64(r.CreatedUTC), 0),
 		IsNew:      r.New,
 		Type:       r.Type,
@@ -79,4 +207,170 @@ func (r *rawMessage) toMessage() Message {
 		ParentID:   r.ParentID,
 		WasComment: r.WasComment,
 	}
+}
+
+type rawPost struct {
+	ID            string  `json:"id"`
+	Name          string  `json:"name"`
+	Subreddit     string  `json:"subreddit"`
+	Title         string  `json:"title"`
+	Author        string  `json:"author"`
+	SelfText      string  `json:"selftext"`
+	URL           string  `json:"url"`
+	Permalink     string  `json:"permalink"`
+	Domain        string  `json:"domain"`
+	Score         int     `json:"score"`
+	UpvoteRatio   float64 `json:"upvote_ratio"`
+	NumComments   int     `json:"num_comments"`
+	CreatedUTC    float64 `json:"created_utc"`
+	IsSelf        bool    `json:"is_self"`
+	Over18        bool    `json:"over_18"`
+	Stickied      bool    `json:"stickied"`
+	Locked        bool    `json:"locked"`
+	Archived      bool    `json:"archived"`
+	Saved         bool    `json:"saved"`
+	Hidden        bool    `json:"hidden"`
+	IsVideo       bool    `json:"is_video"`
+	Distinguished string  `json:"distinguished"`
+	LinkFlairText string  `json:"link_flair_text"`
+}
+
+func (r *rawPost) toPost() Post {
+	return Post{
+		ID:            r.ID,
+		Fullname:      r.Name,
+		Subreddit:     r.Subreddit,
+		Title:         r.Title,
+		Author:        r.Author,
+		SelfText:      r.SelfText,
+		URL:           r.URL,
+		Permalink:     r.Permalink,
+		Domain:        r.Domain,
+		Score:         r.Score,
+		UpvoteRatio:   r.UpvoteRatio,
+		NumComments:   r.NumComments,
+		Created:       time.Unix(int64(r.CreatedUTC), 0),
+		IsSelf:        r.IsSelf,
+		Over18:        r.Over18,
+		Stickied:      r.Stickied,
+		Locked:        r.Locked,
+		Archived:      r.Archived,
+		Saved:         r.Saved,
+		Hidden:        r.Hidden,
+		IsVideo:       r.IsVideo,
+		Distinguished: r.Distinguished,
+		LinkFlairText: r.LinkFlairText,
+	}
+}
+
+type rawComment struct {
+	ID            string  `json:"id"`
+	Name          string  `json:"name"`
+	Author        string  `json:"author"`
+	Body          string  `json:"body"`
+	BodyHTML      string  `json:"body_html"`
+	Subreddit     string  `json:"subreddit"`
+	Score         int     `json:"score"`
+	CreatedUTC    float64 `json:"created_utc"`
+	ParentID      string  `json:"parent_id"`
+	LinkID        string  `json:"link_id"`
+	LinkTitle     string  `json:"link_title"`
+	Permalink     string  `json:"permalink"`
+	Depth         int     `json:"depth"`
+	IsSubmitter   bool    `json:"is_submitter"`
+	Stickied      bool    `json:"stickied"`
+	Edited        bool    `json:"edited"`
+	Distinguished string  `json:"distinguished"`
+}
+
+func (r *rawComment) toComment() Comment {
+	return Comment{
+		ID:            r.ID,
+		Fullname:      r.Name,
+		Author:        r.Author,
+		Body:          r.Body,
+		BodyHTML:      r.BodyHTML,
+		Subreddit:     r.Subreddit,
+		Score:         r.Score,
+		Created:       time.Unix(int64(r.CreatedUTC), 0),
+		ParentID:      r.ParentID,
+		LinkID:        r.LinkID,
+		LinkTitle:     r.LinkTitle,
+		Permalink:     r.Permalink,
+		Depth:         r.Depth,
+		IsSubmitter:   r.IsSubmitter,
+		Stickied:      r.Stickied,
+		Edited:        r.Edited,
+		Distinguished: r.Distinguished,
+	}
+}
+
+type rawUser struct {
+	ID               string  `json:"id"`
+	Name             string  `json:"name"`
+	CreatedUTC       float64 `json:"created_utc"`
+	LinkKarma        int     `json:"link_karma"`
+	CommentKarma     int     `json:"comment_karma"`
+	TotalKarma       int     `json:"total_karma"`
+	IsGold           bool    `json:"is_gold"`
+	IsMod            bool    `json:"is_mod"`
+	Verified         bool    `json:"verified"`
+	HasVerifiedEmail bool    `json:"has_verified_email"`
+	IconImg          string  `json:"icon_img"`
+}
+
+func (r *rawUser) toUser() User {
+	return User{
+		ID:               r.ID,
+		Name:             r.Name,
+		Created:          time.Unix(int64(r.CreatedUTC), 0),
+		LinkKarma:        r.LinkKarma,
+		CommentKarma:     r.CommentKarma,
+		TotalKarma:       r.TotalKarma,
+		IsGold:           r.IsGold,
+		IsMod:            r.IsMod,
+		Verified:         r.Verified,
+		HasVerifiedEmail: r.HasVerifiedEmail,
+		IconImg:          r.IconImg,
+	}
+}
+
+type rawSubreddit struct {
+	ID             string  `json:"id"`
+	DisplayName    string  `json:"display_name"`
+	Title          string  `json:"title"`
+	PublicDesc     string  `json:"public_description"`
+	Subscribers    int     `json:"subscribers"`
+	AccountsActive int    `json:"accounts_active"`
+	CreatedUTC     float64 `json:"created_utc"`
+	Over18         bool    `json:"over_18"`
+	SubredditType  string  `json:"subreddit_type"`
+}
+
+func (r *rawSubreddit) toSubredditInfo() SubredditInfo {
+	return SubredditInfo{
+		ID:            r.ID,
+		Name:          r.DisplayName,
+		Title:         r.Title,
+		Description:   r.PublicDesc,
+		Subscribers:   r.Subscribers,
+		ActiveUsers:   r.AccountsActive,
+		Created:       time.Unix(int64(r.CreatedUTC), 0),
+		Over18:        r.Over18,
+		SubredditType: r.SubredditType,
+	}
+}
+
+// parseListing is a generic listing parser that handles the Reddit listing
+// wrapper and dispatches children based on kind.
+func parseListing(body []byte) (*redditListing, []redditChild, error) {
+	var listing redditListing
+	if err := json.Unmarshal(body, &listing); err != nil {
+		return nil, nil, err
+	}
+	var children []redditChild
+	if err := json.Unmarshal(listing.Data.Children, &children); err != nil {
+		return nil, nil, err
+	}
+	return &listing, children, nil
 }

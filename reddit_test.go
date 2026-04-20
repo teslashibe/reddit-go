@@ -125,3 +125,107 @@ func TestChatMembers(t *testing.T) {
 		t.Logf("  %s (%s)", mb.DisplayName, mb.UserID)
 	}
 }
+
+func TestMyPosts(t *testing.T) {
+	m := getTestClient(t)
+	listing, err := m.MyPosts(5)
+	if err != nil {
+		t.Fatalf("MyPosts() error: %v", err)
+	}
+	t.Logf("Got %d posts", len(listing.Posts))
+	for _, p := range listing.Posts {
+		t.Logf("  [r/%s] %s — %d pts", p.Subreddit, p.Title, p.Score)
+	}
+}
+
+func TestMyComments(t *testing.T) {
+	m := getTestClient(t)
+	listing, err := m.MyComments(5)
+	if err != nil {
+		t.Fatalf("MyComments() error: %v", err)
+	}
+	t.Logf("Got %d comments", len(listing.Comments))
+	for _, c := range listing.Comments {
+		body := c.Body
+		if len(body) > 80 {
+			body = body[:80] + "..."
+		}
+		t.Logf("  [r/%s] %s — %d pts", c.Subreddit, body, c.Score)
+	}
+}
+
+func TestUserAbout(t *testing.T) {
+	m := getTestClient(t)
+	me, err := m.Me()
+	if err != nil {
+		t.Fatalf("Me() error: %v", err)
+	}
+	user, err := m.UserAbout(me.Name)
+	if err != nil {
+		t.Fatalf("UserAbout() error: %v", err)
+	}
+	if user.Name == "" {
+		t.Fatal("UserAbout() returned empty name")
+	}
+	t.Logf("User: %s, karma: %d (link: %d, comment: %d)", user.Name, user.TotalKarma, user.LinkKarma, user.CommentKarma)
+}
+
+func TestSearch(t *testing.T) {
+	m := getTestClient(t)
+	listing, err := m.Search("golang", 5)
+	if err != nil {
+		t.Fatalf("Search() error: %v", err)
+	}
+	t.Logf("Got %d search results for 'golang'", len(listing.Posts))
+	for _, p := range listing.Posts {
+		t.Logf("  [r/%s] %s — %d pts", p.Subreddit, p.Title, p.Score)
+	}
+}
+
+func TestMySubscriptions(t *testing.T) {
+	m := getTestClient(t)
+	listing, err := m.MySubscriptions(5)
+	if err != nil {
+		t.Fatalf("MySubscriptions() error: %v", err)
+	}
+	t.Logf("Got %d subscriptions", len(listing.Subreddits))
+	for _, sr := range listing.Subreddits {
+		t.Logf("  r/%s — %d subscribers", sr.Name, sr.Subscribers)
+	}
+}
+
+func TestSubredditAbout(t *testing.T) {
+	m := getTestClient(t)
+	info, err := m.SubredditAbout("golang")
+	if err != nil {
+		t.Fatalf("SubredditAbout() error: %v", err)
+	}
+	if info.Name == "" {
+		t.Fatal("SubredditAbout() returned empty name")
+	}
+	t.Logf("r/%s — %s (%d subscribers)", info.Name, info.Title, info.Subscribers)
+}
+
+func TestPreferences(t *testing.T) {
+	m := getTestClient(t)
+	prefs, err := m.Preferences()
+	if err != nil {
+		t.Fatalf("Preferences() error: %v", err)
+	}
+	if len(prefs) == 0 {
+		t.Fatal("Preferences() returned empty map")
+	}
+	t.Logf("Got %d preference keys", len(prefs))
+}
+
+func TestTrophies(t *testing.T) {
+	m := getTestClient(t)
+	trophies, err := m.Trophies()
+	if err != nil {
+		t.Fatalf("Trophies() error: %v", err)
+	}
+	t.Logf("Got %d trophies", len(trophies))
+	for _, tr := range trophies {
+		t.Logf("  %s", tr.Name)
+	}
+}

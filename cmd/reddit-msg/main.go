@@ -41,6 +41,18 @@ func main() {
 		cmdUnread(m, args)
 	case "send":
 		cmdSend(m, args)
+	case "posts":
+		cmdPosts(m, args)
+	case "comments":
+		cmdComments(m, args)
+	case "search":
+		cmdSearch(m, args)
+	case "subs":
+		cmdSubs(m, args)
+	case "user":
+		cmdUser(m, args)
+	case "subreddit":
+		cmdSubreddit(m, args)
 	case "chat":
 		if len(args) < 1 {
 			fmt.Fprintln(os.Stderr, "usage: reddit-msg chat <rooms|messages|send|members|whoami>")
@@ -71,7 +83,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, `reddit-msg — Reddit DM & Chat CLI
+	fmt.Fprintln(os.Stderr, `reddit-msg — Reddit CLI
 
 Commands:
   me                         Show authenticated user
@@ -81,6 +93,13 @@ Commands:
   unread   [--limit N]       Read unread items
   send     --to USER --subject SUBJ --body TEXT
                              Send a private message
+  posts    [--limit N]       Show my posts
+  comments [--limit N]       Show my comments
+  search   --query Q [--limit N] [--subreddit SR]
+                             Search Reddit
+  subs     [--limit N]       Show my subscriptions
+  user     --name USERNAME   Show user info
+  subreddit --name NAME      Show subreddit info
 
   chat whoami                Show chat identity
   chat rooms                 List chat rooms
@@ -159,6 +178,227 @@ func cmdSend(m *reddit.Client, args []string) {
 	err := m.Compose(*to, *subject, *body)
 	fatal(err)
 	fmt.Printf("Message sent to u/%s\n", *to)
+}
+
+func cmdPosts(m *reddit.Client, args []string) {
+	fs := flag.NewFlagSet("posts", flag.ExitOnError)
+	limit := fs.Int("limit", 10, "number of posts")
+	jsonOut := fs.Bool("json", false, "output as JSON")
+	_ = fs.Parse(args)
+
+	listing, err := m.MyPosts(*limit)
+	fatal(err)
+
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		fatal(enc.Encode(listing.Posts))
+		return
+	}
+
+	if len(listing.Posts) == 0 {
+		fmt.Println("No posts.")
+		return
+	}
+
+	for _, p := range listing.Posts {
+		ts := p.Created.Format(time.RFC3339)
+		fmt.Printf("[%s] [r/%s] %s — %d pts, %d comments\n", ts, p.Subreddit, p.Title, p.Score, p.NumComments)
+		if p.SelfText != "" {
+			body := p.SelfText
+			if len(body) > 120 {
+				body = body[:120] + "..."
+			}
+			body = strings.ReplaceAll(body, "\n", "\n  ")
+			fmt.Printf("  %s\n", body)
+		}
+		fmt.Println()
+	}
+
+	if listing.After != "" {
+		fmt.Printf("(more available, after=%s)\n", listing.After)
+	}
+}
+
+func cmdComments(m *reddit.Client, args []string) {
+	fs := flag.NewFlagSet("comments", flag.ExitOnError)
+	limit := fs.Int("limit", 10, "number of comments")
+	jsonOut := fs.Bool("json", false, "output as JSON")
+	_ = fs.Parse(args)
+
+	listing, err := m.MyComments(*limit)
+	fatal(err)
+
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		fatal(enc.Encode(listing.Comments))
+		return
+	}
+
+	if len(listing.Comments) == 0 {
+		fmt.Println("No comments.")
+		return
+	}
+
+	for _, c := range listing.Comments {
+		ts := c.Created.Format(time.RFC3339)
+		body := c.Body
+		if len(body) > 120 {
+			body = body[:120] + "..."
+		}
+		body = strings.ReplaceAll(body, "\n", "\n  ")
+		fmt.Printf("[%s] [r/%s] %d pts — on: %s\n", ts, c.Subreddit, c.Score, c.LinkTitle)
+		fmt.Printf("  %s\n\n", body)
+	}
+
+	if listing.After != "" {
+		fmt.Printf("(more available, after=%s)\n", listing.After)
+	}
+}
+
+func cmdSearch(m *reddit.Client, args []string) {
+	fs := flag.NewFlagSet("search", flag.ExitOnError)
+	query := fs.String("query", "", "search query")
+	limit := fs.Int("limit", 10, "number of results")
+	subreddit := fs.String("subreddit", "", "restrict to subreddit")
+	jsonOut := fs.Bool("json", false, "output as JSON")
+	_ = fs.Parse(args)
+
+	if *query == "" {
+		fmt.Fprintln(os.Stderr, "error: --query is required")
+		os.Exit(1)
+	}
+
+	var listing *reddit.PostListing
+	var err error
+	if *subreddit != "" {
+		listing, err = m.SearchInSubreddit(*subreddit, *query, *limit)
+	} else {
+		listing, err = m.Search(*query, *limit)
+	}
+	fatal(err)
+
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		fatal(enc.Encode(listing.Posts))
+		return
+	}
+
+	if len(listing.Posts) == 0 {
+		fmt.Println("No results.")
+		return
+	}
+
+	for _, p := range listing.Posts {
+		ts := p.Created.Format(time.RFC3339)
+		fmt.Printf("[%s] [r/%s] %s — %d pts, %d comments\n", ts, p.Subreddit, p.Title, p.Score, p.NumComments)
+		fmt.Printf("  %s\n\n", p.URL)
+	}
+
+	if listing.After != "" {
+		fmt.Printf("(more available, after=%s)\n", listing.After)
+	}
+}
+
+func cmdSubs(m *reddit.Client, args []string) {
+	fs := flag.NewFlagSet("subs", flag.ExitOnError)
+	limit := fs.Int("limit", 25, "number of subreddits")
+	jsonOut := fs.Bool("json", false, "output as JSON")
+	_ = fs.Parse(args)
+
+	listing, err := m.MySubscriptions(*limit)
+	fatal(err)
+
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		fatal(enc.Encode(listing.Subreddits))
+		return
+	}
+
+	if len(listing.Subreddits) == 0 {
+		fmt.Println("No subscriptions.")
+		return
+	}
+
+	for _, sr := range listing.Subreddits {
+		fmt.Printf("r/%-30s %d subscribers\n", sr.Name, sr.Subscribers)
+	}
+
+	if listing.After != "" {
+		fmt.Printf("\n(more available, after=%s)\n", listing.After)
+	}
+}
+
+func cmdUser(m *reddit.Client, args []string) {
+	fs := flag.NewFlagSet("user", flag.ExitOnError)
+	name := fs.String("name", "", "username")
+	jsonOut := fs.Bool("json", false, "output as JSON")
+	_ = fs.Parse(args)
+
+	if *name == "" {
+		fmt.Fprintln(os.Stderr, "error: --name is required")
+		os.Exit(1)
+	}
+
+	user, err := m.UserAbout(*name)
+	fatal(err)
+
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		fatal(enc.Encode(user))
+		return
+	}
+
+	fmt.Printf("User: u/%s\n", user.Name)
+	fmt.Printf("  ID:            %s\n", user.ID)
+	fmt.Printf("  Total Karma:   %d\n", user.TotalKarma)
+	fmt.Printf("  Link Karma:    %d\n", user.LinkKarma)
+	fmt.Printf("  Comment Karma: %d\n", user.CommentKarma)
+	fmt.Printf("  Created:       %s\n", user.Created.Format(time.RFC3339))
+	fmt.Printf("  Verified:      %v\n", user.Verified)
+	fmt.Printf("  Gold:          %v\n", user.IsGold)
+	fmt.Printf("  Mod:           %v\n", user.IsMod)
+}
+
+func cmdSubreddit(m *reddit.Client, args []string) {
+	fs := flag.NewFlagSet("subreddit", flag.ExitOnError)
+	name := fs.String("name", "", "subreddit name")
+	jsonOut := fs.Bool("json", false, "output as JSON")
+	_ = fs.Parse(args)
+
+	if *name == "" {
+		fmt.Fprintln(os.Stderr, "error: --name is required")
+		os.Exit(1)
+	}
+
+	info, err := m.SubredditAbout(*name)
+	fatal(err)
+
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		fatal(enc.Encode(info))
+		return
+	}
+
+	fmt.Printf("Subreddit: r/%s\n", info.Name)
+	fmt.Printf("  Title:       %s\n", info.Title)
+	fmt.Printf("  Subscribers: %d\n", info.Subscribers)
+	fmt.Printf("  Active:      %d\n", info.ActiveUsers)
+	fmt.Printf("  Type:        %s\n", info.SubredditType)
+	fmt.Printf("  NSFW:        %v\n", info.Over18)
+	fmt.Printf("  Created:     %s\n", info.Created.Format(time.RFC3339))
+	if info.Description != "" {
+		desc := info.Description
+		if len(desc) > 200 {
+			desc = desc[:200] + "..."
+		}
+		fmt.Printf("  Description: %s\n", desc)
+	}
 }
 
 func cmdChatWhoAmI(m *reddit.Client) {

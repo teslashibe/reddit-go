@@ -1,24 +1,13 @@
-# reddit-messenger-go
+# reddit-go
 
-Send and read Reddit direct messages — both legacy private messages and real-time chat.
+Full-surface Reddit API client — messaging, chat, posts, comments, voting, search, subreddits, and account.
 
 No API keys, no OAuth app registration, zero dependencies.
-
-## Two messaging systems, one client
-
-Reddit has two messaging systems. This package supports both:
-
-| System | Endpoint | Use case |
-|--------|----------|----------|
-| **Legacy PMs** | `oauth.reddit.com` | Traditional private messages, any user |
-| **Reddit Chat** | `matrix.redditspace.com` | Real-time chat rooms (Matrix protocol) |
-
-Both authenticate with the same `token_v2` cookie from your browser.
 
 ## Install
 
 ```bash
-go get github.com/teslashibe/reddit-messenger-go
+go get github.com/teslashibe/reddit-go
 ```
 
 ## Get your token
@@ -36,80 +25,136 @@ import (
     "fmt"
     "log"
 
-    redditmessenger "github.com/teslashibe/reddit-messenger-go"
+    "github.com/teslashibe/reddit-go"
 )
 
 func main() {
-    m := redditmessenger.New(&redditmessenger.Options{
+    c := reddit.New(&reddit.Options{
         Token: "your_token_v2_value",
     })
 
-    // Verify auth
-    me, err := m.Me()
+    // Identity
+    me, err := c.Me()
     if err != nil {
         log.Fatal(err)
     }
     fmt.Printf("Logged in as: %s\n", me.Name)
 
-    // Read inbox
-    inbox, _ := m.Inbox(5)
+    // Read inbox & send PMs
+    inbox, _ := c.Inbox(5)
     for _, msg := range inbox.Messages {
         fmt.Printf("[%s] %s: %s\n", msg.Type, msg.Author, msg.Subject)
     }
+    _ = c.Compose("username", "Hello", "Message body here")
 
-    // Send a PM
-    _ = m.Compose("username", "Hello", "Message body here")
-
-    // List chat rooms
-    rooms, _ := m.ChatRooms()
-    for _, r := range rooms {
-        fmt.Println(r.RoomID)
+    // Posts & comments
+    posts, _ := c.MyPosts(10)
+    for _, p := range posts.Posts {
+        fmt.Printf("%s — %d pts\n", p.Title, p.Score)
     }
+    _ = c.Submit("test", "Title", "Body")
+    _, _ = c.Reply("t3_postid", "comment text")
 
-    // Read chat messages
-    msgs, _ := m.ChatMessages(rooms[0].RoomID, 10)
-    for _, msg := range msgs.Messages {
-        fmt.Printf("%s: %s\n", msg.Sender, msg.Body)
-    }
+    // Chat (Matrix)
+    rooms, _ := c.ChatRooms()
+    _, _ = c.ChatSend(rooms[0].RoomID, "Hello from Go!")
 
-    // Send a chat message
-    eventID, _ := m.ChatSend(rooms[0].RoomID, "Hello from Go!")
-    fmt.Printf("Sent: %s\n", eventID)
+    // Search, vote, subscribe
+    results, _ := c.Search("golang", 10)
+    fmt.Printf("Found %d results\n", len(results.Posts))
+    _ = c.Upvote("t3_postid")
+    _ = c.Subscribe("golang")
 }
 ```
 
 ## API
 
+### Identity & Account
+
+```go
+c.Me()                              // Authenticated user identity
+c.Preferences()                     // Account preferences (raw map)
+c.Trophies()                        // Trophy list
+c.Friends()                         // Friend list
+```
+
 ### Legacy Private Messages
 
 ```go
-m.Me()                              // Verify auth, get username
-m.Inbox(limit)                      // All inbox items (PMs + replies)
-m.Messages(limit)                   // PMs only
-m.Sent(limit)                       // Sent messages
-m.Unread(limit)                     // Unread items
-m.Compose(to, subject, body)        // Send a PM
-m.MarkRead(fullnames...)            // Mark as read
-m.MarkUnread(fullnames...)          // Mark as unread
+c.Inbox(limit)                      // All inbox items (PMs + replies)
+c.InboxAfter(limit, after)          // Next page of inbox
+c.Messages(limit)                   // PMs only
+c.MessagesAfter(limit, after)       // Next page of PMs
+c.Sent(limit)                       // Sent messages
+c.SentAfter(limit, after)           // Next page of sent
+c.Unread(limit)                     // Unread items
+c.CommentReplies(limit)             // Replies to your comments
+c.PostReplies(limit)                // Replies to your posts
+c.Compose(to, subject, body)        // Send a PM
+c.MarkRead(fullnames...)            // Mark as read
+c.MarkUnread(fullnames...)          // Mark as unread
 ```
 
-Pagination:
+### Posts & Comments
 
 ```go
-page1, _ := m.Inbox(25)
-page2, _ := m.InboxAfter(25, page1.After)
+c.MyPosts(limit)                    // Your submitted posts
+c.MyComments(limit)                 // Your comments
+c.MyOverview(limit)                 // Mixed post + comment feed
+c.Saved(limit)                      // Saved items
+c.Upvoted(limit)                    // Upvoted posts
+c.Submit(subreddit, title, body)    // Create a self-post
+c.SubmitLink(subreddit, title, url) // Create a link post
+c.Reply(parentID, body)             // Comment on a post/comment
+c.Edit(fullname, newText)           // Edit a self-post or comment
+c.Delete(fullname)                  // Delete a post or comment
+```
+
+### Voting & Actions
+
+```go
+c.Upvote(fullname)                  // Upvote a post or comment
+c.Downvote(fullname)                // Downvote
+c.Unvote(fullname)                  // Remove vote
+c.Save(fullname)                    // Bookmark
+c.Unsave(fullname)                  // Remove bookmark
+c.Hide(fullname)                    // Hide from feed
+c.Unhide(fullname)                  // Unhide
+c.Report(fullname, reason)          // Report
+```
+
+### Search
+
+```go
+c.Search(query, limit)                          // Search all of Reddit
+c.SearchInSubreddit(subreddit, query, limit)     // Search within a subreddit
+```
+
+### Users
+
+```go
+c.UserAbout(username)               // Public info about any user
+```
+
+### Subreddits
+
+```go
+c.MySubscriptions(limit)            // Your subscribed subreddits
+c.SubredditAbout(name)              // Subreddit metadata
+c.Subscribe(subreddit)              // Subscribe
+c.Unsubscribe(subreddit)            // Unsubscribe
 ```
 
 ### Reddit Chat (Matrix)
 
 ```go
-m.ChatWhoAmI()                      // Matrix identity
-m.ChatRooms()                       // List joined rooms
-m.ChatMessages(roomID, limit)       // Read messages (newest first)
-m.ChatMessagesFrom(roomID, limit, token) // Paginate backwards
-m.ChatMembers(roomID)               // Room members
-m.ChatSend(roomID, text)            // Send message
-m.ChatCreateDM(matrixUserID)        // Create DM room
+c.ChatWhoAmI()                      // Matrix identity
+c.ChatRooms()                       // List joined rooms
+c.ChatMessages(roomID, limit)       // Read messages (newest first)
+c.ChatMessagesFrom(roomID, limit, token) // Paginate backwards
+c.ChatMembers(roomID)               // Room members
+c.ChatSend(roomID, text)            // Send message
+c.ChatCreateDM(matrixUserID)        // Create DM room
 ```
 
 Matrix user IDs are `@t2_xxxxx:reddit.com` format.
@@ -117,30 +162,44 @@ Matrix user IDs are `@t2_xxxxx:reddit.com` format.
 ## CLI
 
 ```bash
-go install github.com/teslashibe/reddit-messenger-go/cmd/reddit-msg@latest
+go install github.com/teslashibe/reddit-go/cmd/reddit-msg@latest
 export REDDIT_TOKEN="your_token_v2_value"
 ```
 
 ```bash
-# Auth
+# Identity
 reddit-msg me
 
 # Legacy PMs
-reddit-msg inbox --limit 10
-reddit-msg messages --limit 5
-reddit-msg unread
-reddit-msg send --to username --subject "Hi" --body "Hello there"
+reddit-msg inbox [--limit N]
+reddit-msg messages [--limit N]
+reddit-msg sent [--limit N]
+reddit-msg unread [--limit N]
+reddit-msg send --to USER --subject SUBJ --body TEXT
+
+# Posts & comments
+reddit-msg posts [--limit N]
+reddit-msg comments [--limit N]
+
+# Search
+reddit-msg search --query Q [--limit N] [--subreddit SR]
+
+# Subreddits
+reddit-msg subs [--limit N]
+reddit-msg subreddit --name NAME
+
+# Users
+reddit-msg user --name USERNAME
 
 # Chat
 reddit-msg chat whoami
 reddit-msg chat rooms
-reddit-msg chat messages --room '!roomid:reddit.com' --limit 20
-reddit-msg chat send --room '!roomid:reddit.com' --body "Hello!"
-reddit-msg chat members --room '!roomid:reddit.com'
+reddit-msg chat messages --room ID [--limit N]
+reddit-msg chat send --room ID --body TEXT
+reddit-msg chat members --room ID
 
-# JSON output
+# JSON output (add --json to most commands)
 reddit-msg inbox --limit 5 --json
-reddit-msg chat messages --room '!roomid:reddit.com' --json
 ```
 
 ## Design
