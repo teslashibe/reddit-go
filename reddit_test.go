@@ -1,19 +1,19 @@
-package redditmessenger_test
+package reddit_test
 
 import (
 	"os"
 	"testing"
 
-	redditmessenger "github.com/teslashibe/reddit-messenger-go"
+	"github.com/teslashibe/reddit-go"
 )
 
-func getTestClient(t *testing.T) *redditmessenger.Messenger {
+func getTestClient(t *testing.T) *reddit.Client {
 	t.Helper()
 	token := os.Getenv("REDDIT_TOKEN")
 	if token == "" {
 		t.Skip("REDDIT_TOKEN not set; skipping integration test")
 	}
-	return redditmessenger.New(&redditmessenger.Options{Token: token})
+	return reddit.New(&reddit.Options{Token: token})
 }
 
 func TestMe(t *testing.T) {

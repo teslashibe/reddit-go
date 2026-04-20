@@ -1,4 +1,4 @@
-package redditmessenger
+package reddit
 
 import (
 	"encoding/json"
@@ -7,7 +7,7 @@ import (
 	"strconv"
 )
 
-func (m *Messenger) fetchMessages(endpoint string, limit int, after string) (*MessageListing, error) {
+func (m *Client) fetchMessages(endpoint string, limit int, after string) (*MessageListing, error) {
 	path := endpoint + "?raw_json=1"
 	if limit > 0 {
 		path += "&limit=" + strconv.Itoa(limit)
@@ -38,42 +38,42 @@ func (m *Messenger) fetchMessages(endpoint string, limit int, after string) (*Me
 
 // Inbox returns the user's inbox (PMs + comment replies).
 // Limit of 0 returns Reddit's default (25). Max is 100.
-func (m *Messenger) Inbox(limit int) (*MessageListing, error) {
+func (m *Client) Inbox(limit int) (*MessageListing, error) {
 	return m.fetchMessages("/message/inbox.json", limit, "")
 }
 
 // InboxAfter returns the next page of inbox messages after the given cursor.
-func (m *Messenger) InboxAfter(limit int, after string) (*MessageListing, error) {
+func (m *Client) InboxAfter(limit int, after string) (*MessageListing, error) {
 	return m.fetchMessages("/message/inbox.json", limit, after)
 }
 
 // Messages returns only private messages (no comment replies).
-func (m *Messenger) Messages(limit int) (*MessageListing, error) {
+func (m *Client) Messages(limit int) (*MessageListing, error) {
 	return m.fetchMessages("/message/messages.json", limit, "")
 }
 
 // MessagesAfter returns the next page of PMs after the given cursor.
-func (m *Messenger) MessagesAfter(limit int, after string) (*MessageListing, error) {
+func (m *Client) MessagesAfter(limit int, after string) (*MessageListing, error) {
 	return m.fetchMessages("/message/messages.json", limit, after)
 }
 
 // Sent returns messages sent by the authenticated user.
-func (m *Messenger) Sent(limit int) (*MessageListing, error) {
+func (m *Client) Sent(limit int) (*MessageListing, error) {
 	return m.fetchMessages("/message/sent.json", limit, "")
 }
 
 // SentAfter returns the next page of sent messages after the given cursor.
-func (m *Messenger) SentAfter(limit int, after string) (*MessageListing, error) {
+func (m *Client) SentAfter(limit int, after string) (*MessageListing, error) {
 	return m.fetchMessages("/message/sent.json", limit, after)
 }
 
 // Unread returns unread inbox items.
-func (m *Messenger) Unread(limit int) (*MessageListing, error) {
+func (m *Client) Unread(limit int) (*MessageListing, error) {
 	return m.fetchMessages("/message/unread.json", limit, "")
 }
 
 // Compose sends a private message to a Reddit user.
-func (m *Messenger) Compose(to, subject, body string) error {
+func (m *Client) Compose(to, subject, body string) error {
 	form := url.Values{
 		"api_type": {"json"},
 		"to":       {to},
@@ -100,7 +100,7 @@ func (m *Messenger) Compose(to, subject, body string) error {
 
 // MarkRead marks one or more messages as read.
 // Pass fullnames like "t1_abc123" or "t4_abc123".
-func (m *Messenger) MarkRead(fullnames ...string) error {
+func (m *Client) MarkRead(fullnames ...string) error {
 	if len(fullnames) == 0 {
 		return nil
 	}
@@ -112,7 +112,7 @@ func (m *Messenger) MarkRead(fullnames ...string) error {
 }
 
 // MarkUnread marks one or more messages as unread.
-func (m *Messenger) MarkUnread(fullnames ...string) error {
+func (m *Client) MarkUnread(fullnames ...string) error {
 	if len(fullnames) == 0 {
 		return nil
 	}

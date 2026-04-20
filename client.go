@@ -1,4 +1,4 @@
-package redditmessenger
+package reddit
 
 import (
 	"encoding/json"
@@ -36,8 +36,8 @@ type Options struct {
 	MinRequestGap time.Duration
 }
 
-// Messenger is the main client for sending and reading Reddit messages.
-type Messenger struct {
+// Client is the main Reddit API client.
+type Client struct {
 	httpClient *http.Client
 	token      string
 	userAgent  string
@@ -49,8 +49,8 @@ type Messenger struct {
 	lastRequestAt time.Time
 }
 
-// New creates a Messenger client. Options.Token is required.
-func New(opts *Options) *Messenger {
+// New creates a Reddit API client. Options.Token is required.
+func New(opts *Options) *Client {
 	if opts == nil {
 		opts = &Options{}
 	}
@@ -72,7 +72,7 @@ func New(opts *Options) *Messenger {
 
 	jar, _ := cookiejar.New(nil)
 
-	return &Messenger{
+	return &Client{
 		httpClient: &http.Client{
 			Timeout: timeout,
 			Jar:     jar,
@@ -84,7 +84,7 @@ func New(opts *Options) *Messenger {
 	}
 }
 
-func (m *Messenger) doRequest(method, rawURL string, body io.Reader, contentType string) (*http.Response, error) {
+func (m *Client) doRequest(method, rawURL string, body io.Reader, contentType string) (*http.Response, error) {
 	m.waitForRateLimit()
 
 	req, err := http.NewRequest(method, rawURL, body)
@@ -112,7 +112,7 @@ func (m *Messenger) doRequest(method, rawURL string, body io.Reader, contentType
 	return resp, nil
 }
 
-func (m *Messenger) oauthGet(path string) ([]byte, error) {
+func (m *Client) oauthGet(path string) ([]byte, error) {
 	resp, err := m.doRequest("GET", oauthBaseURL+path, nil, "")
 	if err != nil {
 		return nil, err
@@ -127,7 +127,7 @@ func (m *Messenger) oauthGet(path string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func (m *Messenger) oauthGetJSON(path string, v interface{}) error {
+func (m *Client) oauthGetJSON(path string, v interface{}) error {
 	body, err := m.oauthGet(path)
 	if err != nil {
 		return err
@@ -135,7 +135,7 @@ func (m *Messenger) oauthGetJSON(path string, v interface{}) error {
 	return json.Unmarshal(body, v)
 }
 
-func (m *Messenger) oauthPost(path string, form url.Values) ([]byte, error) {
+func (m *Client) oauthPost(path string, form url.Values) ([]byte, error) {
 	resp, err := m.doRequest("POST", oauthBaseURL+path, strings.NewReader(form.Encode()), "application/x-www-form-urlencoded")
 	if err != nil {
 		return nil, err
@@ -154,7 +154,7 @@ func (m *Messenger) oauthPost(path string, form url.Values) ([]byte, error) {
 	return body, nil
 }
 
-func (m *Messenger) matrixGet(path string) ([]byte, error) {
+func (m *Client) matrixGet(path string) ([]byte, error) {
 	resp, err := m.doRequest("GET", matrixBaseURL+path, nil, "")
 	if err != nil {
 		return nil, err
@@ -169,7 +169,7 @@ func (m *Messenger) matrixGet(path string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func (m *Messenger) matrixGetJSON(path string, v interface{}) error {
+func (m *Client) matrixGetJSON(path string, v interface{}) error {
 	body, err := m.matrixGet(path)
 	if err != nil {
 		return err
@@ -177,7 +177,7 @@ func (m *Messenger) matrixGetJSON(path string, v interface{}) error {
 	return json.Unmarshal(body, v)
 }
 
-func (m *Messenger) matrixPut(path string, payload interface{}) ([]byte, error) {
+func (m *Client) matrixPut(path string, payload interface{}) ([]byte, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling payload: %w", err)
@@ -201,7 +201,7 @@ func (m *Messenger) matrixPut(path string, payload interface{}) ([]byte, error) 
 	return body, nil
 }
 
-func (m *Messenger) matrixPost(path string, payload interface{}) ([]byte, error) {
+func (m *Client) matrixPost(path string, payload interface{}) ([]byte, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling payload: %w", err)
@@ -228,7 +228,7 @@ func (m *Messenger) matrixPost(path string, payload interface{}) ([]byte, error)
 // waitForRateLimit uses a leaky-bucket reservation pattern.
 // The mutex is released before sleeping so concurrent callers
 // each reserve their own slot and wait independently.
-func (m *Messenger) waitForRateLimit() {
+func (m *Client) waitForRateLimit() {
 	m.mu.Lock()
 
 	now := time.Now()
@@ -248,7 +248,7 @@ func (m *Messenger) waitForRateLimit() {
 	}
 }
 
-func (m *Messenger) updateRateLimits(h http.Header) {
+func (m *Client) updateRateLimits(h http.Header) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

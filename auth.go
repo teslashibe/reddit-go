@@ -1,4 +1,4 @@
-package redditmessenger
+package reddit
 
 // Identity holds the authenticated user's basic info from /api/v1/me.
 type Identity struct {
@@ -8,7 +8,7 @@ type Identity struct {
 
 // Me returns the authenticated user's identity.
 // Useful for verifying the token is valid.
-func (m *Messenger) Me() (*Identity, error) {
+func (m *Client) Me() (*Identity, error) {
 	var raw struct {
 		Name string `json:"name"`
 		ID   string `json:"id"`

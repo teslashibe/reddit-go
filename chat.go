@@ -1,4 +1,4 @@
-package redditmessenger
+package reddit
 
 import (
 	"encoding/json"
@@ -9,7 +9,7 @@ import (
 )
 
 // ChatWhoAmI returns the Matrix-side identity of the authenticated user.
-func (m *Messenger) ChatWhoAmI() (*ChatIdentity, error) {
+func (m *Client) ChatWhoAmI() (*ChatIdentity, error) {
 	var id ChatIdentity
 	if err := m.matrixGetJSON("/_matrix/client/r0/account/whoami", &id); err != nil {
 		return nil, err
@@ -18,7 +18,7 @@ func (m *Messenger) ChatWhoAmI() (*ChatIdentity, error) {
 }
 
 // ChatRooms returns all chat rooms the user has joined.
-func (m *Messenger) ChatRooms() ([]ChatRoom, error) {
+func (m *Client) ChatRooms() ([]ChatRoom, error) {
 	var resp matrixRoomListResponse
 	if err := m.matrixGetJSON("/_matrix/client/r0/joined_rooms", &resp); err != nil {
 		return nil, err
@@ -34,12 +34,12 @@ func (m *Messenger) ChatRooms() ([]ChatRoom, error) {
 // ChatMessages returns the most recent messages from a chat room.
 // Direction is backwards (newest first). Use the returned End token
 // to paginate further back with ChatMessagesFrom.
-func (m *Messenger) ChatMessages(roomID string, limit int) (*ChatMessageListing, error) {
+func (m *Client) ChatMessages(roomID string, limit int) (*ChatMessageListing, error) {
 	return m.ChatMessagesFrom(roomID, limit, "")
 }
 
 // ChatMessagesFrom returns messages starting from the given pagination token.
-func (m *Messenger) ChatMessagesFrom(roomID string, limit int, from string) (*ChatMessageListing, error) {
+func (m *Client) ChatMessagesFrom(roomID string, limit int, from string) (*ChatMessageListing, error) {
 	encoded := url.PathEscape(roomID)
 	path := "/_matrix/client/r0/rooms/" + encoded + "/messages?dir=b"
 	if limit > 0 {
@@ -76,7 +76,7 @@ func (m *Messenger) ChatMessagesFrom(roomID string, limit int, from string) (*Ch
 }
 
 // ChatMembers returns the members of a chat room.
-func (m *Messenger) ChatMembers(roomID string) ([]ChatMember, error) {
+func (m *Client) ChatMembers(roomID string) ([]ChatMember, error) {
 	encoded := url.PathEscape(roomID)
 	var resp matrixMemberResponse
 	if err := m.matrixGetJSON("/_matrix/client/r0/rooms/"+encoded+"/members", &resp); err != nil {
@@ -103,7 +103,7 @@ func (m *Messenger) ChatMembers(roomID string) ([]ChatMember, error) {
 
 // ChatSend sends a text message to a chat room.
 // Returns the event ID of the sent message.
-func (m *Messenger) ChatSend(roomID, body string) (string, error) {
+func (m *Client) ChatSend(roomID, body string) (string, error) {
 	encoded := url.PathEscape(roomID)
 	txnID := fmt.Sprintf("m%d.%d", time.Now().UnixMilli(), time.Now().UnixNano()%1000)
 	path := "/_matrix/client/r0/rooms/" + encoded + "/send/m.room.message/" + txnID
@@ -128,7 +128,7 @@ func (m *Messenger) ChatSend(roomID, body string) (string, error) {
 // ChatCreateDM creates a direct-message room with the given Matrix user ID.
 // Matrix user IDs look like "@t2_xxxxx:reddit.com".
 // Returns the new room.
-func (m *Messenger) ChatCreateDM(matrixUserID string) (*ChatRoom, error) {
+func (m *Client) ChatCreateDM(matrixUserID string) (*ChatRoom, error) {
 	req := matrixCreateRoomRequest{
 		IsDirect: true,
 		Invite:   []string{matrixUserID},

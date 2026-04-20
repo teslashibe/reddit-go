@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	redditmessenger "github.com/teslashibe/reddit-messenger-go"
+	"github.com/teslashibe/reddit-go"
 )
 
 func main() {
@@ -23,7 +23,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	m := redditmessenger.New(&redditmessenger.Options{Token: token})
+	m := reddit.New(&reddit.Options{Token: token})
 
 	cmd := os.Args[1]
 	args := os.Args[2:]
@@ -94,13 +94,13 @@ Environment:
   REDDIT_TOKEN               token_v2 cookie value (required)`)
 }
 
-func cmdMe(m *redditmessenger.Messenger) {
+func cmdMe(m *reddit.Client) {
 	id, err := m.Me()
 	fatal(err)
 	fmt.Printf("User: %s (ID: %s)\n", id.Name, id.ID)
 }
 
-func cmdInbox(m *redditmessenger.Messenger, args []string) {
+func cmdInbox(m *reddit.Client, args []string) {
 	fs := flag.NewFlagSet("inbox", flag.ExitOnError)
 	limit := fs.Int("limit", 10, "number of messages")
 	jsonOut := fs.Bool("json", false, "output as JSON")
@@ -111,7 +111,7 @@ func cmdInbox(m *redditmessenger.Messenger, args []string) {
 	printMessages(listing, *jsonOut)
 }
 
-func cmdMessages(m *redditmessenger.Messenger, args []string) {
+func cmdMessages(m *reddit.Client, args []string) {
 	fs := flag.NewFlagSet("messages", flag.ExitOnError)
 	limit := fs.Int("limit", 10, "number of messages")
 	jsonOut := fs.Bool("json", false, "output as JSON")
@@ -122,7 +122,7 @@ func cmdMessages(m *redditmessenger.Messenger, args []string) {
 	printMessages(listing, *jsonOut)
 }
 
-func cmdSent(m *redditmessenger.Messenger, args []string) {
+func cmdSent(m *reddit.Client, args []string) {
 	fs := flag.NewFlagSet("sent", flag.ExitOnError)
 	limit := fs.Int("limit", 10, "number of messages")
 	jsonOut := fs.Bool("json", false, "output as JSON")
@@ -133,7 +133,7 @@ func cmdSent(m *redditmessenger.Messenger, args []string) {
 	printMessages(listing, *jsonOut)
 }
 
-func cmdUnread(m *redditmessenger.Messenger, args []string) {
+func cmdUnread(m *reddit.Client, args []string) {
 	fs := flag.NewFlagSet("unread", flag.ExitOnError)
 	limit := fs.Int("limit", 10, "number of messages")
 	jsonOut := fs.Bool("json", false, "output as JSON")
@@ -144,7 +144,7 @@ func cmdUnread(m *redditmessenger.Messenger, args []string) {
 	printMessages(listing, *jsonOut)
 }
 
-func cmdSend(m *redditmessenger.Messenger, args []string) {
+func cmdSend(m *reddit.Client, args []string) {
 	fs := flag.NewFlagSet("send", flag.ExitOnError)
 	to := fs.String("to", "", "recipient username")
 	subject := fs.String("subject", "", "message subject")
@@ -161,13 +161,13 @@ func cmdSend(m *redditmessenger.Messenger, args []string) {
 	fmt.Printf("Message sent to u/%s\n", *to)
 }
 
-func cmdChatWhoAmI(m *redditmessenger.Messenger) {
+func cmdChatWhoAmI(m *reddit.Client) {
 	id, err := m.ChatWhoAmI()
 	fatal(err)
 	fmt.Printf("Matrix ID: %s\nDevice: %s\n", id.UserID, id.DeviceID)
 }
 
-func cmdChatRooms(m *redditmessenger.Messenger) {
+func cmdChatRooms(m *reddit.Client) {
 	rooms, err := m.ChatRooms()
 	fatal(err)
 	fmt.Printf("Found %d rooms:\n", len(rooms))
@@ -176,7 +176,7 @@ func cmdChatRooms(m *redditmessenger.Messenger) {
 	}
 }
 
-func cmdChatMessages(m *redditmessenger.Messenger, args []string) {
+func cmdChatMessages(m *reddit.Client, args []string) {
 	fs := flag.NewFlagSet("chat messages", flag.ExitOnError)
 	room := fs.String("room", "", "room ID")
 	limit := fs.Int("limit", 10, "number of messages")
@@ -209,7 +209,7 @@ func cmdChatMessages(m *redditmessenger.Messenger, args []string) {
 	}
 }
 
-func cmdChatSend(m *redditmessenger.Messenger, args []string) {
+func cmdChatSend(m *reddit.Client, args []string) {
 	fs := flag.NewFlagSet("chat send", flag.ExitOnError)
 	room := fs.String("room", "", "room ID")
 	body := fs.String("body", "", "message text")
@@ -225,7 +225,7 @@ func cmdChatSend(m *redditmessenger.Messenger, args []string) {
 	fmt.Printf("Sent (event: %s)\n", eventID)
 }
 
-func cmdChatMembers(m *redditmessenger.Messenger, args []string) {
+func cmdChatMembers(m *reddit.Client, args []string) {
 	fs := flag.NewFlagSet("chat members", flag.ExitOnError)
 	room := fs.String("room", "", "room ID")
 	_ = fs.Parse(args)
@@ -248,7 +248,7 @@ func cmdChatMembers(m *redditmessenger.Messenger, args []string) {
 	}
 }
 
-func printMessages(listing *redditmessenger.MessageListing, asJSON bool) {
+func printMessages(listing *reddit.MessageListing, asJSON bool) {
 	if asJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")

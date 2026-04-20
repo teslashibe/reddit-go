@@ -1,4 +1,4 @@
-package redditmessenger
+package reddit
 
 import "time"
 
