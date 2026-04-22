@@ -276,6 +276,29 @@ reddit.New(opts)
 
 ---
 
+## MCP support
+
+This package ships an [MCP](https://modelcontextprotocol.io/) tool surface in `./mcp` for use with [`teslashibe/mcptool`](https://github.com/teslashibe/mcptool)-compatible hosts (e.g. [`teslashibe/agent-setup`](https://github.com/teslashibe/agent-setup)). 48 tools cover the full client API: identity, account (preferences, trophies, friends), inbox/PM/sent/replies + compose + mark read/unread, posts (submit, reply, edit, delete) and listings (my posts/comments/overview, saved, upvoted), voting and saving (upvote, downvote, unvote, save, unsave, hide, unhide, report), subreddits (subscribe/unsubscribe, my subscriptions, about), search (all + per-subreddit), user lookup, and the full Matrix-based chat surface (whoami, rooms, messages, members, send, create DM).
+
+```go
+import (
+    "github.com/teslashibe/mcptool"
+    reddit "github.com/teslashibe/reddit-go"
+    redditmcp "github.com/teslashibe/reddit-go/mcp"
+)
+
+client := reddit.New(&reddit.Options{Token: "..."})
+provider := redditmcp.Provider{}
+for _, tool := range provider.Tools() {
+    // register tool with your MCP server, passing client as the
+    // opaque client argument when invoking
+}
+```
+
+A coverage test in `mcp/mcp_test.go` fails if a new exported method is added to `*Client` without either being wrapped by an MCP tool or being added to `mcp.Excluded` with a reason — keeping the MCP surface in lockstep with the package API is enforced by CI rather than convention.
+
+---
+
 ## License
 
 MIT
