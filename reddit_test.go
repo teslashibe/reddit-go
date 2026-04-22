@@ -204,6 +204,56 @@ func TestSubredditAbout(t *testing.T) {
 		t.Fatal("SubredditAbout() returned empty name")
 	}
 	t.Logf("r/%s — %s (%d subscribers)", info.Name, info.Title, info.Subscribers)
+	// SubredditAbout now also fetches /about/rules — guard the merge.
+	if info.Rules == nil {
+		t.Errorf("expected Rules to be populated by SubredditAbout, got nil")
+	}
+	t.Logf("  %d moderator rules, %d site rules", len(info.Rules), len(info.SiteRules))
+	for _, r := range info.Rules {
+		t.Logf("    [%s] %s", r.Kind, r.ShortName)
+	}
+}
+
+func TestSubredditRules(t *testing.T) {
+	m := getTestClient(t)
+	rules, err := m.SubredditRules("sanfrancisco")
+	if err != nil {
+		t.Fatalf("SubredditRules() error: %v", err)
+	}
+	if len(rules.Rules) == 0 {
+		t.Fatal("expected at least one moderator rule on r/sanfrancisco")
+	}
+	t.Logf("r/sanfrancisco rules: %d moderator + %d site-wide", len(rules.Rules), len(rules.SiteRules))
+}
+
+func TestPostInfoAndComments(t *testing.T) {
+	m := getTestClient(t)
+	// Pick a post off the user's own MyPosts feed so we can also
+	// exercise the view_count code path (Reddit only returns it for
+	// the authenticated user's own posts).
+	mine, err := m.MyPosts(1)
+	if err != nil {
+		t.Fatalf("MyPosts() error: %v", err)
+	}
+	if len(mine.Posts) == 0 {
+		t.Skip("no posts on this account; skipping post-info smoke test")
+	}
+	id := mine.Posts[0].ID
+
+	info, err := m.PostInfo(id)
+	if err != nil {
+		t.Fatalf("PostInfo(%s) error: %v", id, err)
+	}
+	t.Logf("PostInfo: r/%s — %q score=%d ratio=%.2f comments=%d", info.Subreddit, info.Title, info.Score, info.UpvoteRatio, info.NumComments)
+	if info.ViewCount != nil {
+		t.Logf("  view_count=%d", *info.ViewCount)
+	}
+
+	post, comments, err := m.PostComments(id, &reddit.PostCommentsOptions{Limit: 5, Depth: 2})
+	if err != nil {
+		t.Fatalf("PostComments error: %v", err)
+	}
+	t.Logf("PostComments: post=%q + %d comments", post.Title, len(comments))
 }
 
 func TestPreferences(t *testing.T) {
