@@ -1,6 +1,7 @@
 package reddit
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,11 +43,12 @@ type Client struct {
 	token      string
 	userAgent  string
 
-	mu            sync.Mutex
-	remaining     float64
-	resetAt       time.Time
-	minRequestGap time.Duration
-	lastRequestAt time.Time
+	gapMu     sync.Mutex
+	lastReqAt time.Time
+	minGap    time.Duration
+
+	rlMu    sync.Mutex
+	rlState RateLimitState
 }
 
 // New creates a Reddit API client. Options.Token is required.
@@ -77,17 +79,24 @@ func New(opts *Options) *Client {
 			Timeout: timeout,
 			Jar:     jar,
 		},
-		token:         opts.Token,
-		userAgent:     ua,
-		remaining:     100,
-		minRequestGap: gap,
+		token:     opts.Token,
+		userAgent: ua,
+		minGap:    gap,
 	}
 }
 
-func (m *Client) doRequest(method, rawURL string, body io.Reader, contentType string) (*http.Response, error) {
-	m.waitForRateLimit()
+// RateLimit returns a snapshot of the most recently observed rate-limit state.
+// Use RateLimitState.IsLimited() to check if the client is currently throttled.
+func (m *Client) RateLimit() RateLimitState {
+	m.rlMu.Lock()
+	defer m.rlMu.Unlock()
+	return m.rlState
+}
 
-	req, err := http.NewRequest(method, rawURL, body)
+func (m *Client) doRequest(ctx context.Context, method, rawURL string, body io.Reader, contentType string) (*http.Response, error) {
+	m.waitForGap(ctx)
+
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -108,12 +117,32 @@ func (m *Client) doRequest(method, rawURL string, body io.Reader, contentType st
 		return nil, fmt.Errorf("executing request to %s: %w", rawURL, err)
 	}
 
-	m.updateRateLimits(resp.Header)
+	m.updateRateLimit(resp.Header)
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		wait := parseRetryAfter(resp.Header.Get("Retry-After"), 60*time.Second)
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		m.rlMu.Lock()
+		m.rlState.Remaining = 0
+		m.rlState.RetryAfter = wait
+		if m.rlState.Reset.IsZero() || time.Until(m.rlState.Reset) < wait {
+			m.rlState.Reset = time.Now().Add(wait)
+		}
+		m.rlMu.Unlock()
+		m.gapMu.Lock()
+		if earliest := time.Now().Add(wait); m.lastReqAt.Before(earliest) {
+			m.lastReqAt = earliest
+		}
+		m.gapMu.Unlock()
+		return nil, fmt.Errorf("%w", ErrRateLimited)
+	}
+
 	return resp, nil
 }
 
 func (m *Client) oauthGet(path string) ([]byte, error) {
-	resp, err := m.doRequest("GET", oauthBaseURL+path, nil, "")
+	resp, err := m.doRequest(context.Background(), "GET", oauthBaseURL+path, nil, "")
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +165,7 @@ func (m *Client) oauthGetJSON(path string, v interface{}) error {
 }
 
 func (m *Client) oauthPost(path string, form url.Values) ([]byte, error) {
-	resp, err := m.doRequest("POST", oauthBaseURL+path, strings.NewReader(form.Encode()), "application/x-www-form-urlencoded")
+	resp, err := m.doRequest(context.Background(), "POST", oauthBaseURL+path, strings.NewReader(form.Encode()), "application/x-www-form-urlencoded")
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +184,7 @@ func (m *Client) oauthPost(path string, form url.Values) ([]byte, error) {
 }
 
 func (m *Client) matrixGet(path string) ([]byte, error) {
-	resp, err := m.doRequest("GET", matrixBaseURL+path, nil, "")
+	resp, err := m.doRequest(context.Background(), "GET", matrixBaseURL+path, nil, "")
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +212,7 @@ func (m *Client) matrixPut(path string, payload interface{}) ([]byte, error) {
 		return nil, fmt.Errorf("marshaling payload: %w", err)
 	}
 
-	resp, err := m.doRequest("PUT", matrixBaseURL+path, strings.NewReader(string(data)), "application/json")
+	resp, err := m.doRequest(context.Background(), "PUT", matrixBaseURL+path, strings.NewReader(string(data)), "application/json")
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +236,7 @@ func (m *Client) matrixPost(path string, payload interface{}) ([]byte, error) {
 		return nil, fmt.Errorf("marshaling payload: %w", err)
 	}
 
-	resp, err := m.doRequest("POST", matrixBaseURL+path, strings.NewReader(string(data)), "application/json")
+	resp, err := m.doRequest(context.Background(), "POST", matrixBaseURL+path, strings.NewReader(string(data)), "application/json")
 	if err != nil {
 		return nil, err
 	}
@@ -225,43 +254,121 @@ func (m *Client) matrixPost(path string, payload interface{}) ([]byte, error) {
 	return body, nil
 }
 
-// waitForRateLimit uses a leaky-bucket reservation pattern.
-// The mutex is released before sleeping so concurrent callers
-// each reserve their own slot and wait independently.
-func (m *Client) waitForRateLimit() {
-	m.mu.Lock()
+// waitForGap uses a leaky-bucket reservation pattern with adaptive gap logic.
+// The mutex is released before sleeping so concurrent callers each reserve
+// their own slot and wait independently.
+func (m *Client) waitForGap(ctx context.Context) {
+	gap := m.adaptiveGap()
 
+	m.gapMu.Lock()
 	now := time.Now()
-	nextSlot := m.lastRequestAt.Add(m.minRequestGap)
-	if now.After(nextSlot) {
-		nextSlot = now
+	next := m.lastReqAt.Add(gap)
+	if now.After(next) {
+		next = now
 	}
-	if m.remaining <= 2 && m.resetAt.After(nextSlot) {
-		nextSlot = m.resetAt.Add(time.Second)
+	m.lastReqAt = next
+	m.gapMu.Unlock()
+
+	if wait := time.Until(next); wait > 0 {
+		select {
+		case <-ctx.Done():
+		case <-time.After(wait):
+		}
 	}
+	// Clear RetryAfter once we've waited past it.
+	m.rlMu.Lock()
+	m.rlState.RetryAfter = 0
+	m.rlMu.Unlock()
+}
 
-	m.lastRequestAt = nextSlot
-	m.mu.Unlock()
+// adaptiveGap returns the delay before the next request based on observed
+// rate-limit state. Spreads requests across the window when quota is low;
+// waits for reset when quota is exhausted.
+func (m *Client) adaptiveGap() time.Duration {
+	m.rlMu.Lock()
+	rs := m.rlState
+	m.rlMu.Unlock()
 
-	if wait := time.Until(nextSlot); wait > 0 {
-		time.Sleep(wait)
+	// Quota exhausted — wait for the window to reset.
+	if rs.Remaining == 0 && !rs.Reset.IsZero() {
+		if d := time.Until(rs.Reset); d > 0 {
+			return d + 50*time.Millisecond
+		}
+	}
+	// Spread remaining quota evenly across the reset window (90% safety margin).
+	if rs.Remaining > 0 && !rs.Reset.IsZero() {
+		if d := time.Until(rs.Reset); d > 0 {
+			spread := d / time.Duration(float64(rs.Remaining)*0.9)
+			if spread > m.minGap {
+				return spread
+			}
+		}
+	}
+	return m.minGap
+}
+
+// updateRateLimit reads standard rate-limit headers from a response and updates
+// the client's tracked state. Call on every HTTP response.
+func (m *Client) updateRateLimit(h http.Header) {
+	m.rlMu.Lock()
+	defer m.rlMu.Unlock()
+	if v := rlHeader(h, "Limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			m.rlState.Limit = n
+		}
+	}
+	if v := rlHeader(h, "Remaining"); v != "" {
+		// Reddit sends X-Ratelimit-Remaining as a float like "99.0".
+		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			m.rlState.Remaining = int(f)
+		}
+	}
+	if v := rlHeader(h, "Reset"); v != "" {
+		if ts, err := strconv.ParseInt(v, 10, 64); err == nil {
+			if ts > 1_000_000_000 {
+				m.rlState.Reset = time.Unix(ts, 0) // Unix epoch
+			} else {
+				m.rlState.Reset = time.Now().Add(time.Duration(ts) * time.Second) // relative seconds (Reddit style)
+			}
+		}
 	}
 }
 
-func (m *Client) updateRateLimits(h http.Header) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+// rlHeader returns the trimmed value of a rate-limit header, checking the four
+// most common prefix variants.
+func rlHeader(h http.Header, suffix string) string {
+	for _, p := range []string{"X-RateLimit-", "X-Rate-Limit-", "X-Ratelimit-", "RateLimit-"} {
+		if v := strings.TrimSpace(h.Get(p + suffix)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
-	if v := h.Get("X-Ratelimit-Remaining"); v != "" {
-		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
-			m.remaining = f
+// parseRetryAfter parses rate-limit headers. Handles three formats:
+// - Seconds integer (Retry-After: 60)
+// - Unix epoch timestamp (X-Rate-Limit-Reset: 1716000000)
+// - HTTP-date (Retry-After: Mon, 01 Jan 2024 00:00:00 GMT)
+func parseRetryAfter(val string, fallback time.Duration) time.Duration {
+	if val == "" {
+		return fallback
+	}
+	trimmed := strings.TrimSpace(val)
+	if n, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+		if n > 1_000_000_000 {
+			if d := time.Until(time.Unix(n, 0)); d > 0 {
+				return d
+			}
+			return fallback
+		}
+		return time.Duration(n) * time.Second
+	}
+	if t, err := http.ParseTime(trimmed); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
 		}
 	}
-	if v := h.Get("X-Ratelimit-Reset"); v != "" {
-		if secs, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
-			m.resetAt = time.Now().Add(time.Duration(secs) * time.Second)
-		}
-	}
+	return fallback
 }
 
 func truncate(s string, max int) string {
