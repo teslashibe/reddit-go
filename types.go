@@ -62,6 +62,11 @@ type MessageListing struct {
 }
 
 // Post represents a Reddit submission.
+//
+// The engagement-relevant fields (Score, UpvoteRatio, NumComments,
+// ViewCount, TotalAwards, Gilded) are point-in-time snapshots from the
+// most recent fetch. Reddit does not stream updates; re-fetch via
+// Client.PostInfo or Client.PostsInfo to refresh them.
 type Post struct {
 	ID            string    `json:"id"`
 	Fullname      string    `json:"name"`
@@ -75,6 +80,13 @@ type Post struct {
 	Score         int       `json:"score"`
 	UpvoteRatio   float64   `json:"upvote_ratio"`
 	NumComments   int       `json:"num_comments"`
+	// ViewCount is Reddit's reported view count when available. Reddit
+	// only exposes this for posts the authenticated user authored, and
+	// even then it can be absent on very fresh posts. Pointer so callers
+	// can distinguish "unknown" (nil) from "zero views" (*v == 0).
+	ViewCount   *int `json:"view_count,omitempty"`
+	TotalAwards int  `json:"total_awards_received"`
+	Gilded      int  `json:"gilded"`
 	Created       time.Time `json:"created_utc"`
 	IsSelf        bool      `json:"is_self"`
 	Over18        bool      `json:"over_18"`
@@ -153,6 +165,12 @@ type User struct {
 }
 
 // SubredditInfo holds metadata about a subreddit.
+//
+// Rules and SiteRules are populated by SubredditAbout (which makes a
+// second request to /r/{name}/about/rules under the hood) and by
+// SubredditRules. They are nil — not empty slices — when the rules
+// endpoint hasn't been queried yet, so callers can distinguish
+// "no rules" from "rules not loaded".
 type SubredditInfo struct {
 	ID                string    `json:"id"`
 	Name              string    `json:"display_name"`
@@ -163,6 +181,30 @@ type SubredditInfo struct {
 	Created           time.Time `json:"created_utc"`
 	Over18            bool      `json:"over_18"`
 	SubredditType     string    `json:"subreddit_type"`
+	Rules             []SubredditRule `json:"rules,omitempty"`
+	SiteRules         []string        `json:"site_rules,omitempty"`
+}
+
+// SubredditRule is one moderator-defined posting rule for a subreddit.
+//
+// Kind is one of "all", "link", or "comment" and tells you whether the
+// rule applies to posts, links specifically, comments specifically, or
+// everything. ShortName is the bold headline (e.g. "No self-promotion"),
+// Description is the longer Markdown body shown on the rules page.
+type SubredditRule struct {
+	Kind            string    `json:"kind"`
+	ShortName       string    `json:"short_name"`
+	Description     string    `json:"description"`
+	ViolationReason string    `json:"violation_reason,omitempty"`
+	Priority        int       `json:"priority"`
+	Created         time.Time `json:"created_utc"`
+}
+
+// SubredditRules is the response from /r/{name}/about/rules — moderator
+// rules plus the site-wide rules Reddit applies on top of every sub.
+type SubredditRules struct {
+	Rules     []SubredditRule `json:"rules"`
+	SiteRules []string        `json:"site_rules"`
 }
 
 // SubredditListing is a paginated list of subreddits.
@@ -252,6 +294,12 @@ type rawPost struct {
 	Score         int     `json:"score"`
 	UpvoteRatio   float64 `json:"upvote_ratio"`
 	NumComments   int     `json:"num_comments"`
+	// ViewCount is *int because Reddit returns null for posts the
+	// authenticated user did not author. Without the pointer we'd
+	// silently treat unknown views as zero.
+	ViewCount     *int    `json:"view_count"`
+	TotalAwards   int     `json:"total_awards_received"`
+	Gilded        int     `json:"gilded"`
 	CreatedUTC    float64 `json:"created_utc"`
 	IsSelf        bool    `json:"is_self"`
 	Over18        bool    `json:"over_18"`
@@ -279,6 +327,9 @@ func (r *rawPost) toPost() Post {
 		Score:         r.Score,
 		UpvoteRatio:   r.UpvoteRatio,
 		NumComments:   r.NumComments,
+		ViewCount:     r.ViewCount,
+		TotalAwards:   r.TotalAwards,
+		Gilded:        r.Gilded,
 		Created:       time.Unix(int64(r.CreatedUTC), 0),
 		IsSelf:        r.IsSelf,
 		Over18:        r.Over18,
@@ -389,6 +440,43 @@ func (r *rawSubreddit) toSubredditInfo() SubredditInfo {
 		Over18:        r.Over18,
 		SubredditType: r.SubredditType,
 	}
+}
+
+// rawSubredditRules mirrors the JSON shape returned by
+// /r/{name}/about/rules. Reddit returns site-wide rules in two flavors —
+// the legacy `site_rules` (flat list of strings) and the newer
+// `site_rules_flow` (richer per-rule objects). We only surface
+// `site_rules` because the simple list is what the agent actually needs
+// for "summarise the rules before posting", and the flow shape adds a
+// lot of bytes that aren't worth their schema cost.
+type rawSubredditRules struct {
+	Rules []struct {
+		Kind            string  `json:"kind"`
+		ShortName       string  `json:"short_name"`
+		Description     string  `json:"description"`
+		ViolationReason string  `json:"violation_reason"`
+		Priority        int     `json:"priority"`
+		CreatedUTC      float64 `json:"created_utc"`
+	} `json:"rules"`
+	SiteRules []string `json:"site_rules"`
+}
+
+func (r *rawSubredditRules) toSubredditRules() SubredditRules {
+	out := SubredditRules{
+		Rules:     make([]SubredditRule, 0, len(r.Rules)),
+		SiteRules: append([]string(nil), r.SiteRules...),
+	}
+	for _, raw := range r.Rules {
+		out.Rules = append(out.Rules, SubredditRule{
+			Kind:            raw.Kind,
+			ShortName:       raw.ShortName,
+			Description:     raw.Description,
+			ViolationReason: raw.ViolationReason,
+			Priority:        raw.Priority,
+			Created:         time.Unix(int64(raw.CreatedUTC), 0),
+		})
+	}
+	return out
 }
 
 // parseListing is a generic listing parser that handles the Reddit listing

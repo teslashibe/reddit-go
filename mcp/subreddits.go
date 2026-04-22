@@ -22,6 +22,11 @@ type SubredditAboutInput struct {
 	Name string `json:"name" jsonschema:"description=subreddit name without the r/ prefix (e.g. 'golang'),required"`
 }
 
+// SubredditRulesInput is the typed input for reddit_subreddit_rules.
+type SubredditRulesInput struct {
+	Name string `json:"name" jsonschema:"description=subreddit name without the r/ prefix (e.g. 'golang'),required"`
+}
+
 func subscribe(_ context.Context, c *reddit.Client, in SubredditNameInput) (any, error) {
 	if err := c.Subscribe(in.Subreddit); err != nil {
 		return nil, err
@@ -52,6 +57,10 @@ func subredditAbout(_ context.Context, c *reddit.Client, in SubredditAboutInput)
 	return c.SubredditAbout(in.Name)
 }
 
+func subredditRules(_ context.Context, c *reddit.Client, in SubredditRulesInput) (any, error) {
+	return c.SubredditRules(in.Name)
+}
+
 var subredditTools = []mcptool.Tool{
 	mcptool.Define[*reddit.Client, SubredditNameInput](
 		"reddit_subscribe",
@@ -73,8 +82,14 @@ var subredditTools = []mcptool.Tool{
 	),
 	mcptool.Define[*reddit.Client, SubredditAboutInput](
 		"reddit_subreddit_about",
-		"Fetch metadata about a subreddit (subscribers, description, NSFW flag, ...)",
+		"Fetch a subreddit's metadata AND its posting rules (moderator + site-wide). Call this before drafting any post.",
 		"SubredditAbout",
 		subredditAbout,
+	),
+	mcptool.Define[*reddit.Client, SubredditRulesInput](
+		"reddit_subreddit_rules",
+		"Fetch only the moderator + site-wide rules for a subreddit (cheaper than reddit_subreddit_about).",
+		"SubredditRules",
+		subredditRules,
 	),
 }

@@ -88,6 +88,47 @@ func deletePost(_ context.Context, c *reddit.Client, in DeleteInput) (any, error
 	return map[string]any{"ok": true, "fullname": in.Fullname, "deleted": true}, nil
 }
 
+// PostInfoInput is the typed input for reddit_post_info.
+type PostInfoInput struct {
+	ID string `json:"id" jsonschema:"description=Reddit post ID — bare ('abc123') or fullname ('t3_abc123'). Find this in the post URL: reddit.com/r/<sub>/comments/<id>/<slug>,required"`
+}
+
+func postInfo(_ context.Context, c *reddit.Client, in PostInfoInput) (any, error) {
+	return c.PostInfo(in.ID)
+}
+
+// PostsInfoInput is the typed input for reddit_posts_info.
+type PostsInfoInput struct {
+	IDs []string `json:"ids" jsonschema:"description=Reddit post IDs (bare or t3_-prefixed). Up to 100 per call; the client chunks larger requests automatically.,required"`
+}
+
+func postsInfo(_ context.Context, c *reddit.Client, in PostsInfoInput) (any, error) {
+	return c.PostsInfo(in.IDs)
+}
+
+// PostCommentsInput is the typed input for reddit_post_comments.
+type PostCommentsInput struct {
+	ID    string `json:"id" jsonschema:"description=Reddit post ID — bare ('abc123') or fullname ('t3_abc123'),required"`
+	Sort  string `json:"sort,omitempty" jsonschema:"description=comment sort,enum=confidence,enum=top,enum=new,enum=controversial,enum=old,enum=qa"`
+	Limit int    `json:"limit,omitempty" jsonschema:"description=max comments to return (Reddit's max is 500),minimum=1,maximum=500"`
+	Depth int    `json:"depth,omitempty" jsonschema:"description=max tree depth; 1 returns only top-level replies,minimum=1,maximum=10"`
+}
+
+func postComments(_ context.Context, c *reddit.Client, in PostCommentsInput) (any, error) {
+	post, comments, err := c.PostComments(in.ID, &reddit.PostCommentsOptions{
+		Sort:  in.Sort,
+		Limit: in.Limit,
+		Depth: in.Depth,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"post":     post,
+		"comments": comments,
+	}, nil
+}
+
 var postTools = []mcptool.Tool{
 	mcptool.Define[*reddit.Client, SubmitInput](
 		"reddit_submit",
@@ -118,5 +159,23 @@ var postTools = []mcptool.Tool{
 		"Delete one of the authenticated user's posts or comments by Reddit fullname",
 		"Delete",
 		deletePost,
+	),
+	mcptool.Define[*reddit.Client, PostInfoInput](
+		"reddit_post_info",
+		"Fetch live metrics for one post: score, upvote_ratio, num_comments, view_count, awards.",
+		"PostInfo",
+		postInfo,
+	),
+	mcptool.Define[*reddit.Client, PostsInfoInput](
+		"reddit_posts_info",
+		"Batch-fetch live metrics for up to 100 posts in one request (cheaper than N reddit_post_info calls).",
+		"PostsInfo",
+		postsInfo,
+	),
+	mcptool.Define[*reddit.Client, PostCommentsInput](
+		"reddit_post_comments",
+		"Fetch a post + its comment tree (depth-first). Use to analyze sentiment or read replies.",
+		"PostComments",
+		postComments,
 	),
 }
