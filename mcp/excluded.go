@@ -13,4 +13,15 @@ package mcp
 //     auth-only helper, etc.), add it here with a reason
 var Excluded = map[string]string{
 	"RateLimit": "internal observability; surfaced via the host application's MCP middleware, not as a callable tool",
+	// Image upload exposes a single MCP entry point — reddit_submit_image
+	// (SubmitImageFromURL). The other helpers are deliberately Go-only:
+	// SubmitImage takes an already-uploaded S3 URL (an internal artifact
+	// the agent never sees), SubmitImageFromFile / UploadMediaFromFile
+	// take a local filesystem path that the agent has no concept of, and
+	// UploadMedia takes raw bytes that don't fit through the JSON-RPC
+	// tool envelope.
+	"SubmitImage":         "internal helper; agent uses SubmitImageFromURL via reddit_submit_image",
+	"SubmitImageFromFile": "filesystem path not meaningful to a remote agent; use reddit_submit_image with a URL",
+	"UploadMedia":         "raw-bytes API not suitable for JSON-RPC tool envelopes; use reddit_submit_image",
+	"UploadMediaFromFile": "filesystem path not meaningful to a remote agent; use reddit_submit_image",
 }

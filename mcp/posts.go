@@ -49,6 +49,36 @@ func submitLink(_ context.Context, c *reddit.Client, in SubmitLinkInput) (any, e
 	}, nil
 }
 
+// SubmitImageInput is the typed input for reddit_submit_image. The
+// agent passes an http(s) URL — the engagement-studio backend serves
+// chat-attached images via signed URLs at /api/uploads/<id>?sig=...
+// and the agent quotes that URL into the message it sends; this tool
+// fetches the bytes and walks Reddit's lease + S3 + submit dance.
+//
+// We deliberately don't accept raw bytes — passing megabytes through
+// the JSON-RPC tool envelope makes every transcript huge, and the
+// engagement-studio upload endpoint already gives us a stable
+// short-lived URL.
+type SubmitImageInput struct {
+	Subreddit string `json:"subreddit" jsonschema:"description=subreddit name without the r/ prefix (e.g. 'golang'),required"`
+	Title     string `json:"title" jsonschema:"description=post title,required"`
+	ImageURL  string `json:"image_url" jsonschema:"description=publicly fetchable URL of the image to upload (PNG/JPEG/GIF/WebP). The tool downloads the bytes and re-uploads to Reddit's S3 — DO NOT pass an i.redd.it URL here.,required,format=uri"`
+}
+
+func submitImage(_ context.Context, c *reddit.Client, in SubmitImageInput) (any, error) {
+	post, err := c.SubmitImageFromURL(in.Subreddit, in.Title, in.ImageURL)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"ok":        true,
+		"subreddit": in.Subreddit,
+		"id":        post.ID,
+		"fullname":  post.Fullname,
+		"url":       post.URL,
+	}, nil
+}
+
 // ReplyInput is the typed input for reddit_reply.
 type ReplyInput struct {
 	ParentID string `json:"parent_id" jsonschema:"description=Reddit fullname of the parent post (t3_xxx) or comment (t1_xxx) being replied to,required"`
@@ -129,6 +159,15 @@ func postComments(_ context.Context, c *reddit.Client, in PostCommentsInput) (an
 	}, nil
 }
 
+// PostInsightsInput is the typed input for reddit_post_insights.
+type PostInsightsInput struct {
+	ID string `json:"id" jsonschema:"description=Reddit post ID — bare ('abc123') or fullname ('t3_abc123'). Must be a post authored by the authenticated user; insights are owner-only.,required"`
+}
+
+func postInsights(_ context.Context, c *reddit.Client, in PostInsightsInput) (any, error) {
+	return c.PostInsights(in.ID)
+}
+
 var postTools = []mcptool.Tool{
 	mcptool.Define[*reddit.Client, SubmitInput](
 		"reddit_submit",
@@ -141,6 +180,12 @@ var postTools = []mcptool.Tool{
 		"Create a link post in a subreddit",
 		"SubmitLink",
 		submitLink,
+	),
+	mcptool.Define[*reddit.Client, SubmitImageInput](
+		"reddit_submit_image",
+		"Create an image post in a subreddit by fetching an image URL and uploading it to Reddit's S3.",
+		"SubmitImageFromURL",
+		submitImage,
 	),
 	mcptool.Define[*reddit.Client, ReplyInput](
 		"reddit_reply",
@@ -177,5 +222,11 @@ var postTools = []mcptool.Tool{
 		"Fetch a post + its comment tree (depth-first). Use to analyze sentiment or read replies.",
 		"PostComments",
 		postComments,
+	),
+	mcptool.Define[*reddit.Client, PostInsightsInput](
+		"reddit_post_insights",
+		"Author-only analytics for OUR post: total views, hourly view chart, shares, top comments, ribbon.",
+		"PostInsights",
+		postInsights,
 	),
 }
