@@ -214,6 +214,79 @@ type SubredditListing struct {
 	Before     string
 }
 
+// PostInsights captures the metrics shown on the /poststats/{id}/ page —
+// the analytics view Reddit only renders for the post's author. This is
+// strictly richer than what /api/info returns: hourly view breakdown,
+// share count, top comments, etc. Fields can be zero/empty when the
+// section is missing on the rendered page (e.g. very fresh posts have
+// no hourly chart yet) so callers should treat zero as "unknown" not
+// "definitely zero" for the chart-only fields (HourlyViews).
+type PostInsights struct {
+	// PostID is the bare post id ("1sf4xjz", no t3_ prefix) the
+	// insights are for. Echoed back from the input so callers
+	// don't have to re-pass it.
+	PostID string `json:"post_id"`
+	// Title and Subreddit are the post's display headline and home
+	// sub, scraped from the post-card section at the top of the
+	// insights page.
+	Title     string `json:"title,omitempty"`
+	Subreddit string `json:"subreddit,omitempty"`
+	// Permalink is the full URL to the post (always /r/.../comments/...).
+	// Useful to render a "View on Reddit" link alongside the metrics.
+	Permalink string `json:"permalink,omitempty"`
+	// PersonalComparison is the headline ribbon at the top of the
+	// page, e.g. "🥇 Incredible! This is your #1 post of all time"
+	// or "Top 5% of your posts". Empty when the page has no ribbon.
+	PersonalComparison string `json:"personal_comparison,omitempty"`
+
+	// Reach.
+	TotalViews          int    `json:"total_views"`
+	TotalViewsFormatted string `json:"total_views_formatted,omitempty"`
+	// ViewsChange is the 24-hour delta Reddit shows next to the
+	// total ("+74"). Negative numbers are possible if the post is
+	// losing visibility. Stored as the raw integer; the formatted
+	// "+74" is in ViewsChangeFormatted.
+	ViewsChange          int    `json:"views_change"`
+	ViewsChangeFormatted string `json:"views_change_formatted,omitempty"`
+	// HourlyViews is the per-hour view chart for the first 48
+	// hours after posting. Index 0 == hour 1. Empty for very fresh
+	// posts (the chart needs at least 1h of data) and for posts
+	// older than ~30 days (Reddit drops the chart eventually).
+	HourlyViews []HourlyViews `json:"hourly_views,omitempty"`
+
+	// Engagement.
+	Upvotes     int     `json:"upvotes"`
+	UpvoteRatio float64 `json:"upvote_ratio"`
+	Comments    int     `json:"comments"`
+	Shares      int     `json:"shares"`
+	Crossposts  int     `json:"crossposts"`
+	Awards      int     `json:"awards"`
+
+	// TopComments is the leading comments Reddit highlights on the
+	// insights page (always 3 in our observation, but treat as
+	// "up to 3"). Ordered by Reddit's pick (usually highest score).
+	TopComments []InsightTopComment `json:"top_comments,omitempty"`
+}
+
+// HourlyViews is one bar of the 48-hour view chart. HourOffset is
+// 1-indexed (matches Reddit's "Hour 1" label) and Views is the count
+// for that hour.
+type HourlyViews struct {
+	HourOffset int `json:"hour_offset"`
+	Views      int `json:"views"`
+}
+
+// InsightTopComment is one of the "top comments" Reddit highlights at
+// the bottom of the insights page. Body is the un-truncated comment
+// text (the page sometimes truncates with "…" but Reddit re-renders
+// the full text in the screen-reader metadata, which we prefer).
+type InsightTopComment struct {
+	Author    string `json:"author"`
+	Body      string `json:"body"`
+	Score     int    `json:"score"`
+	Permalink string `json:"permalink"`
+}
+
 // Trophy represents a Reddit trophy/award.
 type Trophy struct {
 	Name        string `json:"name"`

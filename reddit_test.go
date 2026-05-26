@@ -1,6 +1,7 @@
 package reddit_test
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 
@@ -14,6 +15,24 @@ func getTestClient(t *testing.T) *reddit.Client {
 		t.Skip("REDDIT_TOKEN not set; skipping integration test")
 	}
 	return reddit.New(&reddit.Options{Token: token})
+}
+
+// getTestClientWithCookies returns a client with the full cookie set
+// loaded — required for endpoints that hit www.reddit.com (currently
+// just PostInsights). REDDIT_COOKIES must be a JSON object mapping
+// cookie name to value, e.g. {"reddit_session":"...","token_v2":"..."}.
+func getTestClientWithCookies(t *testing.T) *reddit.Client {
+	t.Helper()
+	token := os.Getenv("REDDIT_TOKEN")
+	cookiesJSON := os.Getenv("REDDIT_COOKIES")
+	if token == "" || cookiesJSON == "" {
+		t.Skip("REDDIT_TOKEN and REDDIT_COOKIES (JSON map) required; skipping")
+	}
+	var cookies map[string]string
+	if err := json.Unmarshal([]byte(cookiesJSON), &cookies); err != nil {
+		t.Fatalf("REDDIT_COOKIES is not valid JSON: %v", err)
+	}
+	return reddit.New(&reddit.Options{Token: token, Cookies: cookies})
 }
 
 func TestMe(t *testing.T) {
@@ -254,6 +273,57 @@ func TestPostInfoAndComments(t *testing.T) {
 		t.Fatalf("PostComments error: %v", err)
 	}
 	t.Logf("PostComments: post=%q + %d comments", post.Title, len(comments))
+}
+
+// TestPostInsights hits www.reddit.com/poststats/{id}/ and parses
+// the rendered HTML. Requires REDDIT_COOKIES because the bearer
+// token alone gets bounced to /login. Picks the most recent post
+// off the user's own feed so the page always renders (Reddit only
+// shows insights to the post author).
+func TestPostInsights(t *testing.T) {
+	m := getTestClientWithCookies(t)
+	mine, err := m.MyPosts(1)
+	if err != nil {
+		t.Fatalf("MyPosts() error: %v", err)
+	}
+	if len(mine.Posts) == 0 {
+		t.Skip("no posts on this account; skipping insights smoke test")
+	}
+	id := mine.Posts[0].ID
+
+	insights, err := m.PostInsights(id)
+	if err != nil {
+		t.Fatalf("PostInsights(%s) error: %v", id, err)
+	}
+	if insights.Title == "" {
+		t.Errorf("expected non-empty Title")
+	}
+	if insights.Subreddit == "" {
+		t.Errorf("expected non-empty Subreddit")
+	}
+	t.Logf(
+		"PostInsights[%s]: r/%s — %q",
+		insights.PostID, insights.Subreddit, insights.Title,
+	)
+	t.Logf(
+		"  views=%d (%s, change %s) • upvotes=%d (%.1f%%) • comments=%d • shares=%d • crossposts=%d • awards=%d",
+		insights.TotalViews,
+		insights.TotalViewsFormatted,
+		insights.ViewsChangeFormatted,
+		insights.Upvotes,
+		insights.UpvoteRatio*100,
+		insights.Comments,
+		insights.Shares,
+		insights.Crossposts,
+		insights.Awards,
+	)
+	if insights.PersonalComparison != "" {
+		t.Logf("  ribbon: %s", insights.PersonalComparison)
+	}
+	t.Logf("  hourly chart: %d hours", len(insights.HourlyViews))
+	for _, c := range insights.TopComments {
+		t.Logf("  top comment by u/%s (%d upvotes): %s", c.Author, c.Score, c.Body)
+	}
 }
 
 func TestPreferences(t *testing.T) {

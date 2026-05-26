@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 
 const (
 	oauthBaseURL     = "https://oauth.reddit.com"
+	wwwBaseURL       = "https://www.reddit.com"
 	matrixBaseURL    = "https://matrix.redditspace.com"
 	defaultUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 	defaultTimeout   = 30 * time.Second
@@ -26,6 +28,14 @@ type Options struct {
 	// Token is the token_v2 cookie value from a logged-in Reddit session.
 	// Get it from browser DevTools → Application → Cookies → reddit.com → token_v2.
 	Token string
+
+	// Cookies is the full cookie set from the same logged-in session,
+	// keyed by cookie name (e.g. "reddit_session", "csrf_token", "loid").
+	// Optional for the OAuth API — only required for endpoints that
+	// reject bearer-only auth, namely the post-insights HTML pages
+	// at www.reddit.com/poststats/{id}/. If you intend to call
+	// PostInsights, include at minimum reddit_session and token_v2.
+	Cookies map[string]string
 
 	// UserAgent overrides the default browser-like User-Agent string.
 	UserAgent string
@@ -41,7 +51,11 @@ type Options struct {
 type Client struct {
 	httpClient *http.Client
 	token      string
-	userAgent  string
+	// cookieHeader is the pre-baked Cookie header value for www.reddit.com
+	// requests. Computed once at construction so we don't re-stringify
+	// on every PostInsights call. Empty when Options.Cookies wasn't set.
+	cookieHeader string
+	userAgent    string
 
 	gapMu     sync.Mutex
 	lastReqAt time.Time
@@ -74,14 +88,40 @@ func New(opts *Options) *Client {
 
 	jar, _ := cookiejar.New(nil)
 
+	// Build the Cookie header once so we don't re-allocate per request.
+	// Order doesn't matter to Reddit, but we sort for deterministic
+	// output (helps when grepping wire dumps in tests).
+	var cookieHeader string
+	if len(opts.Cookies) > 0 {
+		names := make([]string, 0, len(opts.Cookies))
+		for name := range opts.Cookies {
+			if name == "" {
+				continue
+			}
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		var b strings.Builder
+		for i, name := range names {
+			if i > 0 {
+				b.WriteString("; ")
+			}
+			b.WriteString(name)
+			b.WriteByte('=')
+			b.WriteString(opts.Cookies[name])
+		}
+		cookieHeader = b.String()
+	}
+
 	return &Client{
 		httpClient: &http.Client{
 			Timeout: timeout,
 			Jar:     jar,
 		},
-		token:     opts.Token,
-		userAgent: ua,
-		minGap:    gap,
+		token:        opts.Token,
+		cookieHeader: cookieHeader,
+		userAgent:    ua,
+		minGap:        gap,
 	}
 }
 
@@ -102,8 +142,17 @@ func (m *Client) doRequest(ctx context.Context, method, rawURL string, body io.R
 	}
 
 	req.Header.Set("User-Agent", m.userAgent)
+	// www.reddit.com endpoints (poststats, signed-out feeds) reject
+	// bearer-only requests with a login redirect — they need the
+	// real cookie set instead. OAuth + matrix endpoints accept the
+	// bearer alone, so we attach both opportunistically and let the
+	// server pick. Stripping the bearer for www.reddit.com isn't
+	// required (it just gets ignored), so we keep the code simple.
 	if m.token != "" {
 		req.Header.Set("Authorization", "Bearer "+m.token)
+	}
+	if m.cookieHeader != "" && strings.HasPrefix(rawURL, wwwBaseURL) {
+		req.Header.Set("Cookie", m.cookieHeader)
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
@@ -180,6 +229,57 @@ func (m *Client) oauthPost(path string, form url.Values) ([]byte, error) {
 		return nil, fmt.Errorf("unexpected status %d from POST %s: %s", resp.StatusCode, path, truncate(string(body), 200))
 	}
 
+	return body, nil
+}
+
+// webGet fetches a path from www.reddit.com — the user-facing site,
+// not oauth.reddit.com. Used for endpoints that don't have an OAuth
+// equivalent (currently just /poststats/{id}/, the post-insights HTML
+// page). Sends both the bearer token and the full cookie set so the
+// site recognizes the session as fully logged-in (bearer alone gets
+// redirected to /login).
+//
+// Returns an error if Options.Cookies wasn't supplied — the page
+// always 302s on bearer-only requests, so failing fast is friendlier
+// than returning a login page as bytes.
+//
+// The Accept header is text/html so Reddit returns the rendered page
+// (vs an SSE/JSON variant for clients that opt in).
+func (m *Client) webGet(path string) ([]byte, error) {
+	if m.cookieHeader == "" {
+		return nil, fmt.Errorf("www.reddit.com request requires Options.Cookies (got empty)")
+	}
+	req, err := http.NewRequestWithContext(context.Background(), "GET", wwwBaseURL+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("User-Agent", m.userAgent)
+	req.Header.Set("Cookie", m.cookieHeader)
+	if m.token != "" {
+		req.Header.Set("Authorization", "Bearer "+m.token)
+	}
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9")
+	// Match the rate-limit gap so we don't burst www.reddit.com — it
+	// shares quota in practice with oauth.reddit.com.
+	m.waitForGap(req.Context())
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("executing request to %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status %d from %s: %s", resp.StatusCode, path, truncate(string(body), 200))
+	}
+	// Reddit serves the login page with a 200 when the session looks
+	// dead but the URL is reachable, so detect by content. The login
+	// HTML always contains "Welcome to Reddit" in <title>.
+	if bytes := body; len(bytes) < 200_000 && strings.Contains(string(bytes), "<title>Welcome to Reddit</title>") {
+		return nil, fmt.Errorf("session not authenticated for %s (got login page; refresh cookies)", path)
+	}
 	return body, nil
 }
 
