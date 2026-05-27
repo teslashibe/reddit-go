@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	reddit "github.com/teslashibe/reddit-go"
 	redditmcp "github.com/teslashibe/reddit-go/mcp"
@@ -19,7 +20,11 @@ func main() {
 		log.Fatal("REDDIT_TOKEN environment variable required (token_v2 cookie value)")
 	}
 
-	client := reddit.New(&reddit.Options{Token: token})
+	opts := &reddit.Options{Token: token}
+	if cookies := loadCookies(); cookies != nil {
+		opts.Cookies = cookies
+	}
+	client := reddit.New(opts)
 
 	s := server.NewMCPServer(
 		"reddit-mcp",
@@ -55,6 +60,44 @@ func main() {
 	if err := server.ServeStdio(s); err != nil {
 		log.Fatalf("serve: %v", err)
 	}
+}
+
+// loadCookies tries, in order:
+//  1. REDDIT_COOKIES env var (JSON object)
+//  2. ~/.config/cookie-sync/reddit.json (written by the Chrome extension)
+//
+// Returns nil if neither source has cookies.
+func loadCookies() map[string]string {
+	if raw := os.Getenv("REDDIT_COOKIES"); raw != "" {
+		var cookies map[string]string
+		if err := json.Unmarshal([]byte(raw), &cookies); err != nil {
+			log.Fatalf("REDDIT_COOKIES is not valid JSON: %v", err)
+		}
+		log.Println("[cookie-sync] loaded cookies from REDDIT_COOKIES env var")
+		return cookies
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	path := filepath.Join(home, ".config", "cookie-sync", "reddit.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var synced struct {
+		Cookies map[string]string `json:"cookies"`
+	}
+	if err := json.Unmarshal(data, &synced); err != nil {
+		log.Printf("[cookie-sync] warning: %s is not valid JSON: %v", path, err)
+		return nil
+	}
+	if len(synced.Cookies) == 0 {
+		return nil
+	}
+	log.Printf("[cookie-sync] loaded %d cookies from %s", len(synced.Cookies), path)
+	return synced.Cookies
 }
 
 func toInputSchema(raw map[string]any) mcpgo.ToolInputSchema {
