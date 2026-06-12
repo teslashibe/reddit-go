@@ -63,6 +63,35 @@ type Client struct {
 
 	rlMu    sync.Mutex
 	rlState RateLimitState
+
+	// authCookies is the cookie set this client was constructed with, kept so
+	// callers (e.g. the MCP host's RefreshCredential) can persist a freshly
+	// minted session back to their credential store. Set from Options.Cookies.
+	authCookies map[string]string
+}
+
+// AuthSnapshot returns the client's current bearer token and cookie set, so a
+// host can persist a freshly minted credential-login session for reuse.
+func (m *Client) AuthSnapshot() (token string, cookies map[string]string) {
+	if len(m.authCookies) == 0 {
+		return m.token, nil
+	}
+	out := make(map[string]string, len(m.authCookies))
+	for k, v := range m.authCookies {
+		out[k] = v
+	}
+	return m.token, out
+}
+
+// NewFromLogin builds a client from a credential-login result, preserving the
+// minted bearer and cookies (so AuthSnapshot can hand them back for persistence).
+func NewFromLogin(res *LoginResult) *Client {
+	if res == nil {
+		return New(nil)
+	}
+	c := New(&Options{Token: res.Token, Cookies: res.Cookies, UserAgent: res.UserAgent})
+	c.authCookies = res.Cookies
+	return c
 }
 
 // New creates a Reddit API client. Options.Token is required.
@@ -122,6 +151,7 @@ func New(opts *Options) *Client {
 		cookieHeader: cookieHeader,
 		userAgent:    ua,
 		minGap:        gap,
+		authCookies:   opts.Cookies,
 	}
 }
 
