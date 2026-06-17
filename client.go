@@ -1,6 +1,7 @@
 package reddit
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -150,8 +151,8 @@ func New(opts *Options) *Client {
 		token:        opts.Token,
 		cookieHeader: cookieHeader,
 		userAgent:    ua,
-		minGap:        gap,
-		authCookies:   opts.Cookies,
+		minGap:       gap,
+		authCookies:  opts.Cookies,
 	}
 }
 
@@ -229,6 +230,12 @@ func (m *Client) oauthGet(path string) ([]byte, error) {
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
+		// Only 401 means the bearer is expired/invalid. 403 is a resource-level
+		// denial (private/banned subreddit, inaccessible rules) on a perfectly
+		// valid token — re-minting the session won't help, so don't flag it.
+		if resp.StatusCode == http.StatusUnauthorized {
+			return nil, fmt.Errorf("unexpected status %d from %s: %s: %w", resp.StatusCode, path, truncate(string(body), 200), ErrUnauthorized)
+		}
 		return nil, fmt.Errorf("unexpected status %d from %s: %s", resp.StatusCode, path, truncate(string(body), 200))
 	}
 
@@ -307,10 +314,20 @@ func (m *Client) webGet(path string) ([]byte, error) {
 	// Reddit serves the login page with a 200 when the session looks
 	// dead but the URL is reachable, so detect by content. The login
 	// HTML always contains "Welcome to Reddit" in <title>.
-	if bytes := body; len(bytes) < 200_000 && strings.Contains(string(bytes), "<title>Welcome to Reddit</title>") {
-		return nil, fmt.Errorf("session not authenticated for %s (got login page; refresh cookies)", path)
+	if b := body; len(b) < 200_000 && strings.Contains(string(b), "<title>Welcome to Reddit</title>") {
+		return nil, fmt.Errorf("session not authenticated for %s (got login page; refresh cookies): %w", path, ErrUnauthorized)
 	}
 	return body, nil
+}
+
+// matrixStatusErr builds an error for a non-2xx Matrix response, wrapping
+// ErrUnauthorized on a 401 or any body carrying the Matrix M_UNKNOWN_TOKEN
+// error code (Reddit returns this once the bearer's chat session has lapsed).
+func matrixStatusErr(status int, body []byte, what string) error {
+	if status == http.StatusUnauthorized || bytes.Contains(body, []byte("M_UNKNOWN_TOKEN")) {
+		return fmt.Errorf("matrix status %d from %s: %s: %w", status, what, truncate(string(body), 200), ErrUnauthorized)
+	}
+	return fmt.Errorf("matrix status %d from %s: %s", status, what, truncate(string(body), 200))
 }
 
 func (m *Client) matrixGet(path string) ([]byte, error) {
@@ -322,10 +339,29 @@ func (m *Client) matrixGet(path string) ([]byte, error) {
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("matrix status %d from %s: %s", resp.StatusCode, path, truncate(string(body), 200))
+		return nil, matrixStatusErr(resp.StatusCode, body, path)
 	}
 
 	return io.ReadAll(resp.Body)
+}
+
+// HealthCheck verifies the bearer is live for Reddit CHAT (Matrix), not just
+// REST. It hits the Matrix whoami endpoint and returns ErrUnauthorized when the
+// chat session has lapsed (M_UNKNOWN_TOKEN) — the exact failure that leaves
+// chat broken while oauth.reddit.com still accepts the same token. Hosts use
+// this so connection status reflects chat auth.
+func (m *Client) HealthCheck(ctx context.Context) error {
+	resp, err := m.doRequest(ctx, "GET", matrixBaseURL+"/_matrix/client/r0/account/whoami", nil, "")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == 200 {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2000))
+	return matrixStatusErr(resp.StatusCode, body, "/_matrix/client/r0/account/whoami")
 }
 
 func (m *Client) matrixGetJSON(path string, v interface{}) error {
@@ -354,7 +390,7 @@ func (m *Client) matrixPut(path string, payload interface{}) ([]byte, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("matrix status %d from PUT %s: %s", resp.StatusCode, path, truncate(string(body), 200))
+		return nil, matrixStatusErr(resp.StatusCode, body, "PUT "+path)
 	}
 
 	return body, nil
@@ -378,7 +414,7 @@ func (m *Client) matrixPost(path string, payload interface{}) ([]byte, error) {
 	}
 
 	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("matrix status %d from POST %s: %s", resp.StatusCode, path, truncate(string(body), 200))
+		return nil, matrixStatusErr(resp.StatusCode, body, "POST "+path)
 	}
 
 	return body, nil

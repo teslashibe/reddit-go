@@ -12,7 +12,9 @@ package mcp
 //   - if the method is unsuitable for an agent (internal observability,
 //     auth-only helper, etc.), add it here with a reason
 var Excluded = map[string]string{
-	"RateLimit": "internal observability; surfaced via the host application's MCP middleware, not as a callable tool",
+	"RateLimit":    "internal observability; surfaced via the host application's MCP middleware, not as a callable tool",
+	"AuthSnapshot": "auth-only helper for the host to persist a minted session; not an agent-callable action",
+	"HealthCheck":  "host-side liveness probe (chat-aware) for connection status; not an agent-callable action",
 	// Image upload exposes a single MCP entry point — reddit_submit_image
 	// (SubmitImageFromURL). The other helpers are deliberately Go-only:
 	// SubmitImage takes an already-uploaded S3 URL (an internal artifact
