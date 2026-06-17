@@ -230,7 +230,10 @@ func (m *Client) oauthGet(path string) ([]byte, error) {
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		// Only 401 means the bearer is expired/invalid. 403 is a resource-level
+		// denial (private/banned subreddit, inaccessible rules) on a perfectly
+		// valid token — re-minting the session won't help, so don't flag it.
+		if resp.StatusCode == http.StatusUnauthorized {
 			return nil, fmt.Errorf("unexpected status %d from %s: %s: %w", resp.StatusCode, path, truncate(string(body), 200), ErrUnauthorized)
 		}
 		return nil, fmt.Errorf("unexpected status %d from %s: %s", resp.StatusCode, path, truncate(string(body), 200))
