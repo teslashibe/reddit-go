@@ -96,7 +96,12 @@ func Login(ctx context.Context, p LoginParams) (*LoginResult, error) {
 	// Reddit's login edge fingerprints the TLS ClientHello (JA3) and rejects
 	// Go's default stack with a 403 block page. Present Chrome's ClientHello
 	// via the shared impersonate transport so the login looks like a browser.
-	hc := impersonate.NewClient(impersonate.Options{}, jar, defaultTimeout)
+	//
+	// ProxyURL, when set, tunnels the whole login (every request on hc) through
+	// a residential gateway. Reddit's login edge 401s datacenter IPs, so a
+	// datacenter caller MUST egress residential or the login never establishes
+	// a session even with a valid reCAPTCHA token.
+	hc := impersonate.NewClient(impersonate.Options{ProxyURL: strings.TrimSpace(p.ProxyURL)}, jar, defaultTimeout)
 
 	// Reddit gates login behind reCAPTCHA Enterprise: every POST to
 	// /svc/shreddit/account/login must carry a recaptcha_token or the edge
