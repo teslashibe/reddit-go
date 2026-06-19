@@ -19,12 +19,12 @@ type MySubscriptionsInput struct {
 
 // SubredditAboutInput is the typed input for reddit_subreddit_about.
 type SubredditAboutInput struct {
-	Name string `json:"name" jsonschema:"description=subreddit name without the r/ prefix (e.g. 'golang'),required"`
+	Subreddit string `json:"subreddit" jsonschema:"description=subreddit name without the r/ prefix (e.g. 'golang'),required"`
 }
 
 // SubredditRulesInput is the typed input for reddit_subreddit_rules.
 type SubredditRulesInput struct {
-	Name string `json:"name" jsonschema:"description=subreddit name without the r/ prefix (e.g. 'golang'),required"`
+	Subreddit string `json:"subreddit" jsonschema:"description=subreddit name without the r/ prefix (e.g. 'golang'),required"`
 }
 
 func subscribe(_ context.Context, c *reddit.Client, in SubredditNameInput) (any, error) {
@@ -54,11 +54,11 @@ func mySubscriptions(_ context.Context, c *reddit.Client, in MySubscriptionsInpu
 }
 
 func subredditAbout(_ context.Context, c *reddit.Client, in SubredditAboutInput) (any, error) {
-	return c.SubredditAbout(in.Name)
+	return c.SubredditAbout(in.Subreddit)
 }
 
 func subredditRules(_ context.Context, c *reddit.Client, in SubredditRulesInput) (any, error) {
-	return c.SubredditRules(in.Name)
+	return c.SubredditRules(in.Subreddit)
 }
 
 var subredditTools = []mcptool.Tool{
