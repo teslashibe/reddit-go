@@ -2,7 +2,9 @@ package reddit
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -23,6 +25,95 @@ func TestNormalizePostFullname(t *testing.T) {
 		if got := normalizePostFullname(in); got != want {
 			t.Errorf("normalizePostFullname(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestReplyJSONErrors(t *testing.T) {
+	// replyResult mirrors the struct inside Client.Reply so we can test the
+	// json.errors branch without a live HTTP round-trip.
+	type replyResult struct {
+		JSON struct {
+			Errors [][]string `json:"errors"`
+			Data   struct {
+				Things []struct {
+					Data struct{ ID string `json:"id"` } `json:"data"`
+				} `json:"things"`
+			} `json:"data"`
+		} `json:"json"`
+	}
+
+	parse := func(body string) (string, error) {
+		var result replyResult
+		if err := json.Unmarshal([]byte(body), &result); err != nil {
+			return "", err
+		}
+		if len(result.JSON.Errors) > 0 {
+			e := result.JSON.Errors[0]
+			msg := "reddit error posting comment"
+			if len(e) >= 2 {
+				msg = fmt.Sprintf("reddit error: %s — %s", e[0], e[1])
+			} else if len(e) == 1 {
+				msg = fmt.Sprintf("reddit error: %s", e[0])
+			}
+			return "", fmt.Errorf("%s", msg)
+		}
+		if len(result.JSON.Data.Things) == 0 {
+			return "", fmt.Errorf("no comment returned in response")
+		}
+		return result.JSON.Data.Things[0].Data.ID, nil
+	}
+
+	cases := []struct {
+		name    string
+		body    string
+		wantID  string
+		wantErr string
+	}{
+		{
+			name:   "success",
+			body:   `{"json":{"errors":[],"data":{"things":[{"kind":"t1","data":{"id":"abc123"}}]}}}`,
+			wantID: "abc123",
+		},
+		{
+			name:    "quota filled",
+			body:    `{"json":{"errors":[["QUOTA_FILLED","you are doing that too much. try again in 8 minutes.","ratelimit"]],"data":{}}}`,
+			wantErr: "QUOTA_FILLED",
+		},
+		{
+			name:    "ratelimit",
+			body:    `{"json":{"errors":[["RATELIMIT","take a break","ratelimit"]],"data":{}}}`,
+			wantErr: "RATELIMIT",
+		},
+		{
+			name:    "single-element error",
+			body:    `{"json":{"errors":[["SUBREDDIT_NOEXIST"]],"data":{}}}`,
+			wantErr: "SUBREDDIT_NOEXIST",
+		},
+		{
+			name:    "empty things no errors",
+			body:    `{"json":{"errors":[],"data":{"things":[]}}}`,
+			wantErr: "no comment returned in response",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			id, err := parse(tc.body)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("error %q does not contain %q", err.Error(), tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if id != tc.wantID {
+				t.Errorf("id = %q, want %q", id, tc.wantID)
+			}
+		})
 	}
 }
 

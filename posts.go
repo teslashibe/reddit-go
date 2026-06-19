@@ -75,7 +75,12 @@ func (c *Client) Reply(parentID, body string) (string, error) {
 
 	var result struct {
 		JSON struct {
-			Data struct {
+			// Errors carries Reddit's application-level error list (e.g.
+			// QUOTA_FILLED, RATELIMIT). Each entry is a 3-element slice:
+			// [code, message, field]. The HTTP status is still 200, so
+			// checking here is the only way to surface these failures.
+			Errors [][]string `json:"errors"`
+			Data   struct {
 				Things []struct {
 					Data struct {
 						ID string `json:"id"`
@@ -86,6 +91,16 @@ func (c *Client) Reply(parentID, body string) (string, error) {
 	}
 	if err := json.Unmarshal(resp, &result); err != nil {
 		return "", fmt.Errorf("parsing comment response: %w", err)
+	}
+	if len(result.JSON.Errors) > 0 {
+		e := result.JSON.Errors[0]
+		msg := "reddit error posting comment"
+		if len(e) >= 2 {
+			msg = fmt.Sprintf("reddit error: %s — %s", e[0], e[1])
+		} else if len(e) == 1 {
+			msg = fmt.Sprintf("reddit error: %s", e[0])
+		}
+		return "", fmt.Errorf("%s", msg)
 	}
 	if len(result.JSON.Data.Things) == 0 {
 		return "", fmt.Errorf("no comment returned in response")
