@@ -267,7 +267,26 @@ func (m *Client) oauthGetJSON(path string, v interface{}) error {
 	if err != nil {
 		return err
 	}
+	if err := redditAPIBodyError(path, body); err != nil {
+		return err
+	}
 	return json.Unmarshal(body, v)
+}
+
+// redditAPIBodyError detects Reddit's 200-with-error-body pattern, where the
+// API returns HTTP 200 but the JSON payload carries a top-level "error" key
+// (e.g. {"message":"Not Found","error":404}). Without this check, callers that
+// unmarshal into a typed struct (e.g. a wrapper expecting a "data" key) silently
+// get a zero-valued struct back instead of an explicit error.
+func redditAPIBodyError(path string, body []byte) error {
+	var probe struct {
+		Error   json.RawMessage `json:"error"`
+		Message string          `json:"message"`
+	}
+	if json.Unmarshal(body, &probe) == nil && len(probe.Error) > 0 && string(probe.Error) != "null" {
+		return fmt.Errorf("reddit API error from %s: %s %s", path, probe.Error, probe.Message)
+	}
+	return nil
 }
 
 func (m *Client) oauthPost(path string, form url.Values) ([]byte, error) {
