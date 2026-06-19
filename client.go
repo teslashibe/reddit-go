@@ -202,7 +202,13 @@ func (m *Client) doRequest(ctx context.Context, method, rawURL string, body io.R
 	if m.token != "" {
 		req.Header.Set("Authorization", "Bearer "+m.token)
 	}
-	if m.cookieHeader != "" && strings.HasPrefix(rawURL, wwwBaseURL) {
+	// Send session cookies to both www.reddit.com AND oauth.reddit.com.
+	// Reddit's web-session token (minted via /svc/shreddit/token) is
+	// session-backed: read GETs on oauth.reddit.com are accepted with the
+	// bearer alone, but write POSTs (/api/comment, /api/submit, etc.) require
+	// the session cookies alongside the bearer — the same behaviour as a
+	// browser, which sends *.reddit.com cookies to every reddit subdomain.
+	if m.cookieHeader != "" && (strings.HasPrefix(rawURL, wwwBaseURL) || strings.HasPrefix(rawURL, oauthBaseURL)) {
 		req.Header.Set("Cookie", m.cookieHeader)
 	}
 	if contentType != "" {
