@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	impersonate "github.com/teslashibe/impersonate-go"
 )
 
 const (
@@ -46,6 +48,11 @@ type Options struct {
 
 	// MinRequestGap sets the minimum interval between requests (default 650ms).
 	MinRequestGap time.Duration
+
+	// ProxyURL, when set, routes every API request through an HTTP/S proxy
+	// (e.g. a Webshare residential gateway). Use the same sticky session as
+	// LoginParams.ProxyURL so login and post-login traffic egress from one IP.
+	ProxyURL string
 }
 
 // Client is the main Reddit API client.
@@ -90,7 +97,12 @@ func NewFromLogin(res *LoginResult) *Client {
 	if res == nil {
 		return New(nil)
 	}
-	c := New(&Options{Token: res.Token, Cookies: res.Cookies, UserAgent: res.UserAgent})
+	c := New(&Options{
+		Token:     res.Token,
+		Cookies:   res.Cookies,
+		UserAgent: res.UserAgent,
+		ProxyURL:  res.ProxyURL,
+	})
 	c.authCookies = res.Cookies
 	return c
 }
@@ -117,6 +129,7 @@ func New(opts *Options) *Client {
 	}
 
 	jar, _ := cookiejar.New(nil)
+	httpClient := newHTTPClient(jar, timeout, strings.TrimSpace(opts.ProxyURL))
 
 	// Build the Cookie header once so we don't re-allocate per request.
 	// Order doesn't matter to Reddit, but we sort for deterministic
@@ -144,16 +157,23 @@ func New(opts *Options) *Client {
 	}
 
 	return &Client{
-		httpClient: &http.Client{
-			Timeout: timeout,
-			Jar:     jar,
-		},
+		httpClient:   httpClient,
 		token:        opts.Token,
 		cookieHeader: cookieHeader,
 		userAgent:    ua,
 		minGap:       gap,
 		authCookies:  opts.Cookies,
 	}
+}
+
+// newHTTPClient builds the Reddit API http.Client. When proxyURL is set, every
+// request tunnels through it via the Chrome-impersonating transport (same as
+// Login) so post-login traffic egresses from the same residential IP as login.
+func newHTTPClient(jar http.CookieJar, timeout time.Duration, proxyURL string) *http.Client {
+	if proxyURL != "" {
+		return impersonate.NewClient(impersonate.Options{ProxyURL: proxyURL}, jar, timeout)
+	}
+	return &http.Client{Timeout: timeout, Jar: jar}
 }
 
 // RateLimit returns a snapshot of the most recently observed rate-limit state.

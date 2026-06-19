@@ -68,11 +68,14 @@ type LoginParams struct {
 const RecaptchaSiteKey = "6LfirrMoAAAAAHZOipvza4kpp_VtTwLNuXVwURNQ"
 
 // LoginResult is the minted session, suitable for passing straight into New
-// via Options{Token, Cookies, UserAgent}.
+// via Options{Token, Cookies, UserAgent, ProxyURL}.
 type LoginResult struct {
 	Token     string
 	Cookies   map[string]string
 	UserAgent string
+	// ProxyURL is the residential gateway used for login; NewFromLogin reuses
+	// it so post-login API calls egress from the same IP.
+	ProxyURL string
 }
 
 // Login authenticates with a username + password and returns a minted session
@@ -231,7 +234,12 @@ func Login(ctx context.Context, p LoginParams) (*LoginResult, error) {
 	// complete jar too.
 	cookies = collectCookies(jar)
 
-	return &LoginResult{Token: token, Cookies: cookies, UserAgent: ua}, nil
+	return &LoginResult{
+		Token:     token,
+		Cookies:   cookies,
+		UserAgent: ua,
+		ProxyURL:  strings.TrimSpace(p.ProxyURL),
+	}, nil
 }
 
 // ErrTwoFactorRequired is returned by Login when the account has 2FA enabled
