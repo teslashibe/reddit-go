@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"time"
 
 	reddit "github.com/teslashibe/reddit-go"
 	"github.com/teslashibe/mcptool"
@@ -27,6 +28,16 @@ type ChatMessagesInput struct {
 	Limit  int    `json:"limit,omitempty" jsonschema:"description=max messages to return,minimum=1,maximum=100,default=20"`
 }
 
+type chatMessageOutput struct {
+	EventID   string `json:"event_id"`
+	RoomID    string `json:"room_id"`
+	Sender    string `json:"sender"`
+	Body      string `json:"body"`
+	MsgType   string `json:"msgtype,omitempty"`
+	Type      string `json:"type,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+}
+
 func chatMessages(_ context.Context, c *reddit.Client, in ChatMessagesInput) (any, error) {
 	limit := in.Limit
 	if limit <= 0 {
@@ -36,7 +47,7 @@ func chatMessages(_ context.Context, c *reddit.Client, in ChatMessagesInput) (an
 	if err != nil {
 		return nil, err
 	}
-	return mcptool.PageOf(res.Messages, res.End, limit), nil
+	return chatMessagePage(res.Messages, res.End, limit), nil
 }
 
 // ChatMessagesFromInput is the typed input for reddit_chat_messages_from.
@@ -55,7 +66,30 @@ func chatMessagesFrom(_ context.Context, c *reddit.Client, in ChatMessagesFromIn
 	if err != nil {
 		return nil, err
 	}
-	return mcptool.PageOf(res.Messages, res.End, limit), nil
+	return chatMessagePage(res.Messages, res.End, limit), nil
+}
+
+func chatMessagePage(messages []reddit.ChatMessage, cursor string, limit int) any {
+	items := make([]chatMessageOutput, 0, len(messages))
+	for _, msg := range messages {
+		items = append(items, chatMessageOutput{
+			EventID:   msg.EventID,
+			RoomID:    msg.RoomID,
+			Sender:    msg.Sender,
+			Body:      msg.Body,
+			MsgType:   msg.MsgType,
+			Type:      msg.Type,
+			CreatedAt: formatChatMessageTime(msg.Created),
+		})
+	}
+	return mcptool.PageOf(items, cursor, limit)
+}
+
+func formatChatMessageTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // ChatMembersInput is the typed input for reddit_chat_members.
